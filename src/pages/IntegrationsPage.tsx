@@ -28,6 +28,9 @@ export function IntegrationsPage() {
   const [analyticsPropertyId, setAnalyticsPropertyId] = useState('')
   const [analyticsAccessToken, setAnalyticsAccessToken] = useState('')
   const [analyticsConnection, setAnalyticsConnection] = useState<{ connected: boolean; propertyId: string | null; lastSyncedAt: string | null }>({ connected: false, propertyId: null, lastSyncedAt: null })
+  const [supabaseProjectRef, setSupabaseProjectRef] = useState('')
+  const [supabaseDatabaseUrl, setSupabaseDatabaseUrl] = useState('')
+  const [supabaseUsageConnection, setSupabaseUsageConnection] = useState<{ connected: boolean; projectRef: string | null; lastSyncedAt: string | null }>({ connected: false, projectRef: null, lastSyncedAt: null })
   const [connection, setConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -41,6 +44,8 @@ export function IntegrationsPage() {
   const [isCloudinarySyncing, setIsCloudinarySyncing] = useState(false)
   const [isAnalyticsConnecting, setIsAnalyticsConnecting] = useState(false)
   const [isAnalyticsSyncing, setIsAnalyticsSyncing] = useState(false)
+  const [isSupabaseUsageConnecting, setIsSupabaseUsageConnecting] = useState(false)
+  const [isSupabaseUsageSyncing, setIsSupabaseUsageSyncing] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -66,14 +71,16 @@ export function IntegrationsPage() {
       readStatus('telegram-notify'),
       readStatus('cloudinary-usage'),
       readStatus('google-analytics-sync'),
+      readStatus('supabase-usage'),
       getProjects(),
-    ]).then(([statusResult, githubStatusResult, telegramStatusResult, cloudinaryStatusResult, analyticsStatusResult, loadedProjects]) => {
+    ]).then(([statusResult, githubStatusResult, telegramStatusResult, cloudinaryStatusResult, analyticsStatusResult, supabaseUsageStatusResult, loadedProjects]) => {
       if (!active) return
       if (statusResult.data) setConnection(statusResult.data as typeof connection)
       if (githubStatusResult.data) setGithubConnection(githubStatusResult.data as typeof githubConnection)
       if (telegramStatusResult.data) setTelegramConnection(telegramStatusResult.data as typeof telegramConnection)
       if (cloudinaryStatusResult.data) setCloudinaryConnection(cloudinaryStatusResult.data as typeof cloudinaryConnection)
       if (analyticsStatusResult.data) setAnalyticsConnection(analyticsStatusResult.data as typeof analyticsConnection)
+      if (supabaseUsageStatusResult.data) setSupabaseUsageConnection(supabaseUsageStatusResult.data as typeof supabaseUsageConnection)
       setProjects(loadedProjects)
       setProjectId((current) => current || loadedProjects[0]?.id || '')
       const failures = [
@@ -82,6 +89,7 @@ export function IntegrationsPage() {
         telegramStatusResult.error ? `Telegram: ${telegramStatusResult.error}` : '',
         cloudinaryStatusResult.error ? `Cloudinary: ${cloudinaryStatusResult.error}` : '',
         analyticsStatusResult.error ? `Google Analytics: ${analyticsStatusResult.error}` : '',
+        supabaseUsageStatusResult.error ? `Supabase usage: ${supabaseUsageStatusResult.error}` : '',
       ].filter(Boolean)
       if (failures.length) setError(`Integration status unavailable. ${failures.join(' | ')}`)
     }).catch((loadError: unknown) => {
@@ -327,6 +335,31 @@ export function IntegrationsPage() {
     finally { setIsAnalyticsSyncing(false) }
   }
 
+  const handleSupabaseUsageConnect = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase) return
+    setIsSupabaseUsageConnecting(true); setError(''); setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('supabase-usage', { body: { action: 'connect', projectRef: supabaseProjectRef, databaseUrl: supabaseDatabaseUrl } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setSupabaseUsageConnection({ connected: true, projectRef: String(data.projectRef), lastSyncedAt: null }); setSupabaseDatabaseUrl(''); setMessage('Supabase usage connection validated. The database URL was not retained in the browser.')
+    } catch (connectError) { setError(connectError instanceof Error ? connectError.message : 'Unable to connect Supabase usage.') }
+    finally { setSupabaseDatabaseUrl(''); setIsSupabaseUsageConnecting(false) }
+  }
+
+  const handleSupabaseUsageSync = async () => {
+    if (!supabase || !projectId) return
+    setIsSupabaseUsageSyncing(true); setError(''); setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('supabase-usage', { body: { action: 'sync', projectId } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setSupabaseUsageConnection((current) => ({ ...current, lastSyncedAt: new Date().toISOString() })); setMessage('Imported Supabase database usage.')
+    } catch (syncError) { setError(syncError instanceof Error ? syncError.message : 'Unable to sync Supabase usage.') }
+    finally { setIsSupabaseUsageSyncing(false) }
+  }
+
   const integrations = [
     { name: 'Supabase', status: isDemoMode ? 'Demo mode' : 'Connected', health: isDemoMode ? 'Demo' : 'Healthy', lastSync: isDemoMode ? 'Not syncing' : 'Live query' },
     { name: 'Cloudflare Billing', status: connection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : connection.connected ? 'Ready' : 'Unavailable', lastSync: connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : 'Never' },
@@ -335,6 +368,7 @@ export function IntegrationsPage() {
     { name: 'Telegram', status: telegramConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : telegramConnection.connected ? 'Ready' : 'Unavailable', lastSync: telegramConnection.lastSyncedAt ? new Date(telegramConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Cloudinary Usage', status: cloudinaryConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : cloudinaryConnection.connected ? 'Ready' : 'Unavailable', lastSync: cloudinaryConnection.lastSyncedAt ? new Date(cloudinaryConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Google Analytics', status: analyticsConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : analyticsConnection.connected ? 'Ready' : 'Unavailable', lastSync: analyticsConnection.lastSyncedAt ? new Date(analyticsConnection.lastSyncedAt).toLocaleString() : 'Never' },
+    { name: 'Supabase Usage', status: supabaseUsageConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : supabaseUsageConnection.connected ? 'Ready' : 'Unavailable', lastSync: supabaseUsageConnection.lastSyncedAt ? new Date(supabaseUsageConnection.lastSyncedAt).toLocaleString() : 'Never' },
   ]
 
   return (
@@ -455,6 +489,21 @@ export function IntegrationsPage() {
               <Button type="submit" disabled={isAnalyticsConnecting || isLoading}>{isAnalyticsConnecting ? 'Connecting...' : analyticsConnection.connected ? 'Replace Analytics connection' : 'Connect Google Analytics'}</Button>
             </form>
             {analyticsConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync analytics for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleAnalyticsSync()} disabled={isAnalyticsSyncing || !projectId}>{isAnalyticsSyncing ? 'Syncing...' : 'Sync analytics'}</Button></div> : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isDemoMode ? (
+        <Card>
+          <CardHeader><CardTitle>Supabase usage</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">Connect a Supabase PostgreSQL database to import current database size for the selected project. The database URL is encrypted server-side.</p>
+            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleSupabaseUsageConnect}>
+              <input value={supabaseProjectRef} onChange={(event) => setSupabaseProjectRef(event.target.value)} placeholder="Supabase project ref" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required pattern="[a-z0-9]{20}" />
+              <input type="password" autoComplete="new-password" value={supabaseDatabaseUrl} onChange={(event) => setSupabaseDatabaseUrl(event.target.value)} placeholder="PostgreSQL connection URL" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <Button type="submit" disabled={isSupabaseUsageConnecting || isLoading}>{isSupabaseUsageConnecting ? 'Connecting...' : supabaseUsageConnection.connected ? 'Replace Supabase connection' : 'Connect Supabase usage'}</Button>
+            </form>
+            {supabaseUsageConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync database usage for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleSupabaseUsageSync()} disabled={isSupabaseUsageSyncing || !projectId}>{isSupabaseUsageSyncing ? 'Syncing...' : 'Sync database usage'}</Button></div> : null}
           </CardContent>
         </Card>
       ) : null}
