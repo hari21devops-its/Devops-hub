@@ -16,12 +16,17 @@ export function IntegrationsPage() {
   const [apiToken, setApiToken] = useState('')
   const [githubToken, setGithubToken] = useState('')
   const [githubConnection, setGithubConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
+  const [telegramToken, setTelegramToken] = useState('')
+  const [telegramChatId, setTelegramChatId] = useState('')
+  const [telegramConnection, setTelegramConnection] = useState<{ connected: boolean; chatId: string | null; lastSyncedAt: string | null }>({ connected: false, chatId: null, lastSyncedAt: null })
   const [connection, setConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [isGithubConnecting, setIsGithubConnecting] = useState(false)
   const [isGithubSyncing, setIsGithubSyncing] = useState(false)
+  const [isTelegramConnecting, setIsTelegramConnecting] = useState(false)
+  const [isTelegramSending, setIsTelegramSending] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -35,13 +40,16 @@ export function IntegrationsPage() {
     void Promise.all([
       supabase.functions.invoke('cloudflare-billing', { body: { action: 'status' } }),
       supabase.functions.invoke('github-sync', { body: { action: 'status' } }),
+      supabase.functions.invoke('telegram-notify', { body: { action: 'status' } }),
       getProjects(),
-    ]).then(([statusResult, githubStatusResult, loadedProjects]) => {
+    ]).then(([statusResult, githubStatusResult, telegramStatusResult, loadedProjects]) => {
       if (statusResult.error) throw new Error(statusResult.error.message)
       if (githubStatusResult.error) throw new Error(githubStatusResult.error.message)
+      if (telegramStatusResult.error) throw new Error(telegramStatusResult.error.message)
       if (!active) return
       setConnection(statusResult.data as typeof connection)
       setGithubConnection(githubStatusResult.data as typeof githubConnection)
+      setTelegramConnection(telegramStatusResult.data as typeof telegramConnection)
       setProjects(loadedProjects)
       setProjectId((current) => current || loadedProjects[0]?.id || '')
     }).catch((loadError: unknown) => {
@@ -137,13 +145,52 @@ export function IntegrationsPage() {
     }
   }
 
+  const handleTelegramConnect = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase) return
+    setIsTelegramConnecting(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('telegram-notify', { body: { action: 'connect', botToken: telegramToken, chatId: telegramChatId } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setTelegramConnection({ connected: true, chatId: String(data.chatId), lastSyncedAt: null })
+      setTelegramToken('')
+      setMessage('Telegram connected. The bot token was not retained in the browser.')
+    } catch (connectError) {
+      setError(connectError instanceof Error ? connectError.message : 'Unable to connect Telegram.')
+    } finally {
+      setTelegramToken('')
+      setIsTelegramConnecting(false)
+    }
+  }
+
+  const handleTelegramSend = async () => {
+    if (!supabase) return
+    setIsTelegramSending(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('telegram-notify', { body: { action: 'send_pending' } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setTelegramConnection((current) => ({ ...current, lastSyncedAt: new Date().toISOString() }))
+      setMessage(`Sent ${Number(data.sent ?? 0)} pending Telegram alerts.`)
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : 'Unable to send Telegram alerts.')
+    } finally {
+      setIsTelegramSending(false)
+    }
+  }
+
   const integrations = [
     { name: 'Supabase', status: isDemoMode ? 'Demo mode' : 'Connected', health: isDemoMode ? 'Demo' : 'Healthy', lastSync: isDemoMode ? 'Not syncing' : 'Live query' },
     { name: 'Cloudflare Billing', status: connection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : connection.connected ? 'Ready' : 'Unavailable', lastSync: connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'GitHub Deployments', status: githubConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : githubConnection.connected ? 'Ready' : 'Unavailable', lastSync: githubConnection.lastSyncedAt ? new Date(githubConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Google Analytics', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
     { name: 'Cloudflare', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
-    { name: 'Telegram', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
+    { name: 'Telegram', status: telegramConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : telegramConnection.connected ? 'Ready' : 'Unavailable', lastSync: telegramConnection.lastSyncedAt ? new Date(telegramConnection.lastSyncedAt).toLocaleString() : 'Never' },
   ]
 
   return (
@@ -218,6 +265,21 @@ export function IntegrationsPage() {
               <Button type="submit" disabled={isGithubConnecting || isLoading}>{isGithubConnecting ? 'Connecting...' : githubConnection.connected ? 'Replace GitHub connection' : 'Connect GitHub'}</Button>
             </form>
             {githubConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync repository for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleGithubSync()} disabled={isGithubSyncing || !projectId}>{isGithubSyncing ? 'Syncing...' : 'Sync GitHub deployments'}</Button></div> : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isDemoMode ? (
+        <Card>
+          <CardHeader><CardTitle>Telegram notifications</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">Create a bot with BotFather and provide its token plus the destination chat ID. The token is validated and encrypted server-side.</p>
+            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleTelegramConnect}>
+              <input type="password" autoComplete="new-password" value={telegramToken} onChange={(event) => setTelegramToken(event.target.value)} placeholder="Telegram bot token" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <input value={telegramChatId} onChange={(event) => setTelegramChatId(event.target.value)} placeholder="Chat ID" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <Button type="submit" disabled={isTelegramConnecting || isLoading}>{isTelegramConnecting ? 'Connecting...' : telegramConnection.connected ? 'Replace Telegram connection' : 'Connect Telegram'}</Button>
+            </form>
+            {telegramConnection.connected ? <Button type="button" variant="outline" onClick={() => void handleTelegramSend()} disabled={isTelegramSending}>{isTelegramSending ? 'Sending...' : 'Send pending alerts'}</Button> : null}
           </CardContent>
         </Card>
       ) : null}
