@@ -148,7 +148,7 @@ export function ProjectOverviewPage() {
   const offlineCount = monitors.filter((item) => item.enabled && ['down', 'offline', 'failed'].includes(item.currentStatus.toLowerCase())).length
   const status = monitors.length === 0 ? 'Not configured' : offlineCount ? 'Offline' : onlineCount ? 'Online' : 'Awaiting first check'
   const metricValue = (value: number, hasSource: boolean) => hasSource ? String(value) : 'Unavailable'
-  const provider = (type: string) => integrations.find((item) => item.resourceType.toLowerCase() === type)?.resourceName ?? 'Not connected'
+  const provider = (type: string) => integrations.find((item) => item.resourceType.toLowerCase() === type)?.resourceName ?? (type === 'database' && usageSnapshots.some((item) => item.provider === 'Supabase' && item.metric === 'database_storage') ? 'Supabase' : 'Not connected')
   const usageMetric = (metric: string) => {
     const snapshot = usageSnapshots.find((item) => item.metric.toLowerCase() === metric || (metric === 'database_usage' && item.metric.toLowerCase() === 'database_storage'))
     return snapshot ? `${snapshot.value.toLocaleString()} ${snapshot.unit}` : 'Unavailable'
