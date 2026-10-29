@@ -25,6 +25,9 @@ export function IntegrationsPage() {
   const [cloudinaryApiKey, setCloudinaryApiKey] = useState('')
   const [cloudinaryApiSecret, setCloudinaryApiSecret] = useState('')
   const [cloudinaryConnection, setCloudinaryConnection] = useState<{ connected: boolean; cloudName: string | null; lastSyncedAt: string | null }>({ connected: false, cloudName: null, lastSyncedAt: null })
+  const [analyticsPropertyId, setAnalyticsPropertyId] = useState('')
+  const [analyticsAccessToken, setAnalyticsAccessToken] = useState('')
+  const [analyticsConnection, setAnalyticsConnection] = useState<{ connected: boolean; propertyId: string | null; lastSyncedAt: string | null }>({ connected: false, propertyId: null, lastSyncedAt: null })
   const [connection, setConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -36,6 +39,8 @@ export function IntegrationsPage() {
   const [isTelegramSending, setIsTelegramSending] = useState(false)
   const [isCloudinaryConnecting, setIsCloudinaryConnecting] = useState(false)
   const [isCloudinarySyncing, setIsCloudinarySyncing] = useState(false)
+  const [isAnalyticsConnecting, setIsAnalyticsConnecting] = useState(false)
+  const [isAnalyticsSyncing, setIsAnalyticsSyncing] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -60,13 +65,15 @@ export function IntegrationsPage() {
       readStatus('github-sync'),
       readStatus('telegram-notify'),
       readStatus('cloudinary-usage'),
+      readStatus('google-analytics-sync'),
       getProjects(),
-    ]).then(([statusResult, githubStatusResult, telegramStatusResult, cloudinaryStatusResult, loadedProjects]) => {
+    ]).then(([statusResult, githubStatusResult, telegramStatusResult, cloudinaryStatusResult, analyticsStatusResult, loadedProjects]) => {
       if (!active) return
       if (statusResult.data) setConnection(statusResult.data as typeof connection)
       if (githubStatusResult.data) setGithubConnection(githubStatusResult.data as typeof githubConnection)
       if (telegramStatusResult.data) setTelegramConnection(telegramStatusResult.data as typeof telegramConnection)
       if (cloudinaryStatusResult.data) setCloudinaryConnection(cloudinaryStatusResult.data as typeof cloudinaryConnection)
+      if (analyticsStatusResult.data) setAnalyticsConnection(analyticsStatusResult.data as typeof analyticsConnection)
       setProjects(loadedProjects)
       setProjectId((current) => current || loadedProjects[0]?.id || '')
       const failures = [
@@ -74,6 +81,7 @@ export function IntegrationsPage() {
         githubStatusResult.error ? `GitHub: ${githubStatusResult.error}` : '',
         telegramStatusResult.error ? `Telegram: ${telegramStatusResult.error}` : '',
         cloudinaryStatusResult.error ? `Cloudinary: ${cloudinaryStatusResult.error}` : '',
+        analyticsStatusResult.error ? `Google Analytics: ${analyticsStatusResult.error}` : '',
       ].filter(Boolean)
       if (failures.length) setError(`Integration status unavailable. ${failures.join(' | ')}`)
     }).catch((loadError: unknown) => {
@@ -294,14 +302,39 @@ export function IntegrationsPage() {
     }
   }
 
+  const handleAnalyticsConnect = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase) return
+    setIsAnalyticsConnecting(true); setError(''); setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('google-analytics-sync', { body: { action: 'connect', propertyId: analyticsPropertyId, accessToken: analyticsAccessToken } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setAnalyticsConnection({ connected: true, propertyId: String(data.propertyId), lastSyncedAt: null }); setAnalyticsAccessToken(''); setMessage('Google Analytics connected. The access token was not retained in the browser.')
+    } catch (connectError) { setError(connectError instanceof Error ? connectError.message : 'Unable to connect Google Analytics.') }
+    finally { setAnalyticsAccessToken(''); setIsAnalyticsConnecting(false) }
+  }
+
+  const handleAnalyticsSync = async () => {
+    if (!supabase || !projectId) return
+    setIsAnalyticsSyncing(true); setError(''); setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('google-analytics-sync', { body: { action: 'sync', projectId } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setAnalyticsConnection((current) => ({ ...current, lastSyncedAt: new Date().toISOString() })); setMessage(`Imported ${Number(data.imported ?? 0)} Google Analytics daily rows.`)
+    } catch (syncError) { setError(syncError instanceof Error ? syncError.message : 'Unable to sync Google Analytics.') }
+    finally { setIsAnalyticsSyncing(false) }
+  }
+
   const integrations = [
     { name: 'Supabase', status: isDemoMode ? 'Demo mode' : 'Connected', health: isDemoMode ? 'Demo' : 'Healthy', lastSync: isDemoMode ? 'Not syncing' : 'Live query' },
     { name: 'Cloudflare Billing', status: connection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : connection.connected ? 'Ready' : 'Unavailable', lastSync: connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'GitHub Deployments', status: githubConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : githubConnection.connected ? 'Ready' : 'Unavailable', lastSync: githubConnection.lastSyncedAt ? new Date(githubConnection.lastSyncedAt).toLocaleString() : 'Never' },
-    { name: 'Google Analytics', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
     { name: 'Cloudflare', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
     { name: 'Telegram', status: telegramConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : telegramConnection.connected ? 'Ready' : 'Unavailable', lastSync: telegramConnection.lastSyncedAt ? new Date(telegramConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Cloudinary Usage', status: cloudinaryConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : cloudinaryConnection.connected ? 'Ready' : 'Unavailable', lastSync: cloudinaryConnection.lastSyncedAt ? new Date(cloudinaryConnection.lastSyncedAt).toLocaleString() : 'Never' },
+    { name: 'Google Analytics', status: analyticsConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : analyticsConnection.connected ? 'Ready' : 'Unavailable', lastSync: analyticsConnection.lastSyncedAt ? new Date(analyticsConnection.lastSyncedAt).toLocaleString() : 'Never' },
   ]
 
   return (
@@ -407,6 +440,21 @@ export function IntegrationsPage() {
               <Button type="submit" disabled={isCloudinaryConnecting || isLoading}>{isCloudinaryConnecting ? 'Connecting...' : cloudinaryConnection.connected ? 'Replace Cloudinary connection' : 'Connect Cloudinary'}</Button>
             </form>
             {cloudinaryConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync usage for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleCloudinarySync()} disabled={isCloudinarySyncing || !projectId}>{isCloudinarySyncing ? 'Syncing...' : 'Sync Cloudinary usage'}</Button></div> : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isDemoMode ? (
+        <Card>
+          <CardHeader><CardTitle>Google Analytics</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">Connect a GA4 property with an access token that can read the Google Analytics Admin and Data APIs. Credentials are encrypted server-side.</p>
+            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleAnalyticsConnect}>
+              <input value={analyticsPropertyId} onChange={(event) => setAnalyticsPropertyId(event.target.value)} placeholder="GA4 property ID" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required inputMode="numeric" />
+              <input type="password" autoComplete="new-password" value={analyticsAccessToken} onChange={(event) => setAnalyticsAccessToken(event.target.value)} placeholder="Google access token" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <Button type="submit" disabled={isAnalyticsConnecting || isLoading}>{isAnalyticsConnecting ? 'Connecting...' : analyticsConnection.connected ? 'Replace Analytics connection' : 'Connect Google Analytics'}</Button>
+            </form>
+            {analyticsConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync analytics for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleAnalyticsSync()} disabled={isAnalyticsSyncing || !projectId}>{isAnalyticsSyncing ? 'Syncing...' : 'Sync analytics'}</Button></div> : null}
           </CardContent>
         </Card>
       ) : null}
