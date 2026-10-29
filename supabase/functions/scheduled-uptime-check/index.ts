@@ -59,7 +59,7 @@ async function checkMonitor(monitor: Monitor) {
 
 async function checkDomain(domain: Domain) {
   const hostname = domain.domain_name.replace(/^https?:\/\//i, '').split('/')[0]
-  if (!hostname) return { dnsResolves: false, sslReachable: false, details: { error: 'invalid_domain' } }
+  if (!hostname) return { dnsResolves: false, sslReachable: false, sslExpiresAt: null, sslStatus: 'Unknown', details: { error: 'invalid_domain' } }
 
   let dnsResolves = false
   try {
@@ -78,7 +78,19 @@ async function checkDomain(domain: Domain) {
     sslReachable = false
   }
 
-  return { dnsResolves, sslReachable, details: { hostname } }
+  let sslExpiresAt: string | null = null
+  try {
+    const certificateResponse = await fetch(`https://crt.sh/?q=${encodeURIComponent(`%.${hostname}`)}&output=json`)
+    const certificates = await certificateResponse.json() as Array<{ not_after?: string }>
+    const expirations = certificates.map((certificate) => certificate.not_after ? new Date(certificate.not_after).getTime() : 0).filter((value) => value > Date.now())
+    if (expirations.length) sslExpiresAt = new Date(Math.max(...expirations)).toISOString()
+  } catch {
+    sslExpiresAt = null
+  }
+
+  const daysUntilExpiry = sslExpiresAt ? (new Date(sslExpiresAt).getTime() - Date.now()) / 86400000 : null
+  const sslStatus = daysUntilExpiry == null ? 'Unknown' : daysUntilExpiry <= 0 ? 'Expired' : daysUntilExpiry <= 30 ? 'Expiring Soon' : 'Valid'
+  return { dnsResolves, sslReachable, sslExpiresAt, sslStatus, details: { hostname } }
 }
 
 Deno.serve(async (request) => {
@@ -142,7 +154,10 @@ Deno.serve(async (request) => {
       ssl_reachable: result.sslReachable,
       details: result.details,
     })
-    if (!error) domainsChecked += 1
+    if (!error) {
+      await admin.from('domains').update({ ssl_status: result.sslStatus, ssl_expires_at: result.sslExpiresAt }).eq('id', domain.id).eq('project_id', domain.project_id)
+      domainsChecked += 1
+    }
   }
 
   return new Response(JSON.stringify({ checked, online, offline: checked - online, domainsChecked }), {
