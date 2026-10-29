@@ -19,6 +19,10 @@ export function IntegrationsPage() {
   const [telegramToken, setTelegramToken] = useState('')
   const [telegramChatId, setTelegramChatId] = useState('')
   const [telegramConnection, setTelegramConnection] = useState<{ connected: boolean; chatId: string | null; lastSyncedAt: string | null }>({ connected: false, chatId: null, lastSyncedAt: null })
+  const [cloudinaryCloudName, setCloudinaryCloudName] = useState('')
+  const [cloudinaryApiKey, setCloudinaryApiKey] = useState('')
+  const [cloudinaryApiSecret, setCloudinaryApiSecret] = useState('')
+  const [cloudinaryConnection, setCloudinaryConnection] = useState<{ connected: boolean; cloudName: string | null; lastSyncedAt: string | null }>({ connected: false, cloudName: null, lastSyncedAt: null })
   const [connection, setConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -27,6 +31,8 @@ export function IntegrationsPage() {
   const [isGithubSyncing, setIsGithubSyncing] = useState(false)
   const [isTelegramConnecting, setIsTelegramConnecting] = useState(false)
   const [isTelegramSending, setIsTelegramSending] = useState(false)
+  const [isCloudinaryConnecting, setIsCloudinaryConnecting] = useState(false)
+  const [isCloudinarySyncing, setIsCloudinarySyncing] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -50,18 +56,21 @@ export function IntegrationsPage() {
       readStatus('cloudflare-billing'),
       readStatus('github-sync'),
       readStatus('telegram-notify'),
+      readStatus('cloudinary-usage'),
       getProjects(),
-    ]).then(([statusResult, githubStatusResult, telegramStatusResult, loadedProjects]) => {
+    ]).then(([statusResult, githubStatusResult, telegramStatusResult, cloudinaryStatusResult, loadedProjects]) => {
       if (!active) return
       if (statusResult.data) setConnection(statusResult.data as typeof connection)
       if (githubStatusResult.data) setGithubConnection(githubStatusResult.data as typeof githubConnection)
       if (telegramStatusResult.data) setTelegramConnection(telegramStatusResult.data as typeof telegramConnection)
+      if (cloudinaryStatusResult.data) setCloudinaryConnection(cloudinaryStatusResult.data as typeof cloudinaryConnection)
       setProjects(loadedProjects)
       setProjectId((current) => current || loadedProjects[0]?.id || '')
       const failures = [
         statusResult.error ? `Cloudflare: ${statusResult.error}` : '',
         githubStatusResult.error ? `GitHub: ${githubStatusResult.error}` : '',
         telegramStatusResult.error ? `Telegram: ${telegramStatusResult.error}` : '',
+        cloudinaryStatusResult.error ? `Cloudinary: ${cloudinaryStatusResult.error}` : '',
       ].filter(Boolean)
       if (failures.length) setError(`Integration status unavailable. ${failures.join(' | ')}`)
     }).catch((loadError: unknown) => {
@@ -214,6 +223,44 @@ export function IntegrationsPage() {
     }
   }
 
+  const handleCloudinaryConnect = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase) return
+    setIsCloudinaryConnecting(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('cloudinary-usage', { body: { action: 'connect', cloudName: cloudinaryCloudName, apiKey: cloudinaryApiKey, apiSecret: cloudinaryApiSecret } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setCloudinaryConnection({ connected: true, cloudName: String(data.cloudName), lastSyncedAt: null })
+      setCloudinaryApiKey(''); setCloudinaryApiSecret('')
+      setMessage('Cloudinary connected. Credentials were not retained in the browser.')
+    } catch (connectError) {
+      setError(connectError instanceof Error ? connectError.message : 'Unable to connect Cloudinary.')
+    } finally {
+      setCloudinaryApiKey(''); setCloudinaryApiSecret(''); setIsCloudinaryConnecting(false)
+    }
+  }
+
+  const handleCloudinarySync = async () => {
+    if (!supabase || !projectId) return
+    setIsCloudinarySyncing(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('cloudinary-usage', { body: { action: 'sync', projectId } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setCloudinaryConnection((current) => ({ ...current, lastSyncedAt: new Date().toISOString() }))
+      setMessage(`Imported ${Number(data.imported ?? 0)} Cloudinary usage metrics.`)
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : 'Unable to sync Cloudinary usage.')
+    } finally {
+      setIsCloudinarySyncing(false)
+    }
+  }
+
   const integrations = [
     { name: 'Supabase', status: isDemoMode ? 'Demo mode' : 'Connected', health: isDemoMode ? 'Demo' : 'Healthy', lastSync: isDemoMode ? 'Not syncing' : 'Live query' },
     { name: 'Cloudflare Billing', status: connection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : connection.connected ? 'Ready' : 'Unavailable', lastSync: connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : 'Never' },
@@ -221,6 +268,7 @@ export function IntegrationsPage() {
     { name: 'Google Analytics', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
     { name: 'Cloudflare', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
     { name: 'Telegram', status: telegramConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : telegramConnection.connected ? 'Ready' : 'Unavailable', lastSync: telegramConnection.lastSyncedAt ? new Date(telegramConnection.lastSyncedAt).toLocaleString() : 'Never' },
+    { name: 'Cloudinary Usage', status: cloudinaryConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : cloudinaryConnection.connected ? 'Ready' : 'Unavailable', lastSync: cloudinaryConnection.lastSyncedAt ? new Date(cloudinaryConnection.lastSyncedAt).toLocaleString() : 'Never' },
   ]
 
   return (
@@ -310,6 +358,22 @@ export function IntegrationsPage() {
               <Button type="submit" disabled={isTelegramConnecting || isLoading}>{isTelegramConnecting ? 'Connecting...' : telegramConnection.connected ? 'Replace Telegram connection' : 'Connect Telegram'}</Button>
             </form>
             {telegramConnection.connected ? <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void handleTelegramTest()} disabled={isTelegramSending}>{isTelegramSending ? 'Sending...' : 'Send test message'}</Button><Button type="button" variant="outline" onClick={() => void handleTelegramSend()} disabled={isTelegramSending}>Send pending alerts</Button></div> : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isDemoMode ? (
+        <Card>
+          <CardHeader><CardTitle>Cloudinary usage</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">Connect Cloudinary to import bandwidth, storage, and transformation usage for the selected project. Credentials are encrypted server-side.</p>
+            <form className="grid gap-4 md:grid-cols-4" onSubmit={handleCloudinaryConnect}>
+              <input value={cloudinaryCloudName} onChange={(event) => setCloudinaryCloudName(event.target.value)} placeholder="Cloud name" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <input value={cloudinaryApiKey} onChange={(event) => setCloudinaryApiKey(event.target.value)} placeholder="API key" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <input type="password" autoComplete="new-password" value={cloudinaryApiSecret} onChange={(event) => setCloudinaryApiSecret(event.target.value)} placeholder="API secret" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <Button type="submit" disabled={isCloudinaryConnecting || isLoading}>{isCloudinaryConnecting ? 'Connecting...' : cloudinaryConnection.connected ? 'Replace Cloudinary connection' : 'Connect Cloudinary'}</Button>
+            </form>
+            {cloudinaryConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync usage for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleCloudinarySync()} disabled={isCloudinarySyncing || !projectId}>{isCloudinarySyncing ? 'Syncing...' : 'Sync Cloudinary usage'}</Button></div> : null}
           </CardContent>
         </Card>
       ) : null}
