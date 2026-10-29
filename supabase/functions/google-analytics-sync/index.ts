@@ -16,12 +16,14 @@ async function metadata(propertyId: string, token: string) { const result = awai
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return response({ error: 'Method not allowed.' }, 405)
+  let syncRunId: string | null = null
+  let adminClient: ReturnType<typeof createClient> | null = null
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL'); const anonKey = Deno.env.get('SUPABASE_ANON_KEY'); const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'); const authorization = request.headers.get('Authorization')
     if (!supabaseUrl || !anonKey || !serviceRoleKey) throw new Error('Supabase function secrets are not configured.')
     if (!authorization) return response({ error: 'Sign in is required.' }, 401)
     const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authorization } } }); const { data: { user }, error: authError } = await userClient.auth.getUser(); if (authError || !user) return response({ error: 'The current session is invalid.' }, 401)
-    const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } }); const body = await request.json(); const action = String(body.action ?? '')
+    const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } }); adminClient = admin; const body = await request.json(); const action = String(body.action ?? '')
     const { data: connection } = await admin.from('provider_connections').select('account_id, encrypted_token, token_iv, last_synced_at').eq('owner_id', user.id).eq('provider', 'google_analytics').maybeSingle()
     if (action === 'status') return response({ connected: Boolean(connection), propertyId: connection?.account_id ?? null, lastSyncedAt: connection?.last_synced_at ?? null })
     if (action === 'connect') {
@@ -35,6 +37,7 @@ Deno.serve(async (request) => {
     if (action === 'sync') {
       const projectId = String(body.projectId ?? '').trim(); if (!projectId || !connection) return response({ error: 'Choose a project and connect Google Analytics before syncing.' }, 400)
       const { data: project } = await admin.from('projects').select('id').eq('id', projectId).eq('owner_id', user.id).maybeSingle(); if (!project) return response({ error: 'Project not found for this account.' }, 404)
+      const { data: syncRun, error: syncRunError } = await admin.from('sync_runs').insert({ project_id: projectId, provider: 'google_analytics', status: 'running' }).select('id').single(); if (syncRunError || !syncRun) throw new Error('Unable to start the Google Analytics synchronization record.'); syncRunId = String(syncRun.id)
       const token = await decrypt(String(connection.encrypted_token), String(connection.token_iv)); const propertyId = String(connection.account_id)
       const report = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ dateRanges: [{ startDate: '30daysAgo', endDate: 'yesterday' }], dimensions: [{ name: 'date' }], metrics: [{ name: 'activeUsers' }, { name: 'screenPageViews' }, { name: 'sessions' }], limit: 31 }) })
       const payload = await report.json(); if (!report.ok) throw new Error('Google Analytics report failed. Check Data API access and property permissions.')
@@ -45,8 +48,9 @@ Deno.serve(async (request) => {
       const rows = Array.isArray(payload.rows) ? payload.rows as Record<string, unknown>[] : []; const daily = rows.flatMap((row) => { const dateValue = Array.isArray(row.dimensionValues) ? String((row.dimensionValues[0] as { value?: string })?.value ?? '') : ''; const values = Array.isArray(row.metricValues) ? row.metricValues as { value?: string }[] : []; if (!/^\d{8}$/.test(dateValue)) return []; return [{ project_id: projectId, source_id: sourceId, date: `${dateValue.slice(0, 4)}-${dateValue.slice(4, 6)}-${dateValue.slice(6)}`, unique_visitors: Number(values[0]?.value ?? 0), page_views: Number(values[1]?.value ?? 0), sessions: Number(values[2]?.value ?? 0) }] })
       if (daily.length) { const { error } = await admin.from('analytics_daily').upsert(daily, { onConflict: 'project_id,source_id,date' }); if (error) throw new Error('Google Analytics data was fetched, but daily rows could not be saved.') }
       await admin.from('provider_connections').update({ last_synced_at: new Date().toISOString() }).eq('owner_id', user.id).eq('provider', 'google_analytics')
+      await admin.from('sync_runs').update({ status: 'succeeded', completed_at: new Date().toISOString(), records_imported: daily.length }).eq('id', syncRunId)
       return response({ imported: daily.length, propertyId })
     }
     return response({ error: 'Unsupported action.' }, 400)
-  } catch (error) { return response({ error: error instanceof Error ? error.message : 'Google Analytics operation failed.' }, 500) }
+  } catch (error) { if (syncRunId && adminClient) await adminClient.from('sync_runs').update({ status: 'failed', completed_at: new Date().toISOString(), error_message: error instanceof Error ? error.message : 'Google Analytics operation failed.' }).eq('id', syncRunId); return response({ error: error instanceof Error ? error.message : 'Google Analytics operation failed.' }, 500) }
 })
