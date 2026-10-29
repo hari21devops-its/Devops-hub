@@ -60,8 +60,10 @@ Deno.serve(async (request) => {
       if (integrationError) throw new Error('Supabase usage was fetched, but the project resource association could not be saved.')
       await admin.from('provider_usage_snapshots').delete().eq('project_id', projectId).eq('provider', 'Supabase')
       const usageRows = [{ project_id: projectId, provider: 'Supabase', metric: 'database_storage', value: size, unit: 'bytes', synced_at: syncedAt }]
-      const egress = metricValue(metricsText, /egress|bandwidth/i)
-      if (egress != null) usageRows.push({ project_id: projectId, provider: 'Supabase', metric: 'bandwidth', value: egress, unit: 'bytes', synced_at: syncedAt })
+      const bandwidth = metricValue(metricsText, /bandwidth/i)
+      const egress = metricValue(metricsText, /egress/i)
+      if (bandwidth != null) usageRows.push({ project_id: projectId, provider: 'Supabase', metric: 'bandwidth', value: bandwidth, unit: 'bytes', synced_at: syncedAt })
+      if (egress != null) usageRows.push({ project_id: projectId, provider: 'Supabase', metric: 'egress', value: egress, unit: 'bytes', synced_at: syncedAt })
       const { error } = await admin.from('provider_usage_snapshots').insert(usageRows)
       if (error) throw new Error('Supabase usage was fetched, but the snapshot could not be saved.')
       await admin.from('provider_connections').update({ last_synced_at: syncedAt }).eq('owner_id', user.id).eq('provider', 'supabase')

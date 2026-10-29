@@ -184,6 +184,7 @@ export function ProjectOverviewPage() {
               ['Expenses this month', currentExpenses.length ? currentExpenses.map((expense) => `${expense.currency} ${expense.amount.toLocaleString()}`).join(' + ') : 'No records'],
               ['Active incidents', String(activeIncidents)],
               ['Bandwidth', usageMetric('bandwidth')],
+              ['Egress', usageMetric('egress')],
               ['Database usage', usageMetric('database_usage')],
               ['Storage', usageMetric('storage')],
               ['Recent errors', integrations.some((item) => item.resourceType.toLowerCase() === 'errors') ? 'Open Errors tab' : 'Unavailable'],
