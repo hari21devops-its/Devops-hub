@@ -34,6 +34,7 @@ import {
 } from '../services/data'
 import type { Domain, Project, Service } from '../types'
 import { formatUsageValue } from '../lib/utils'
+import { supabase } from '../services/supabase'
 
 const projectTabs = [
   ['Overview', ''],
@@ -334,6 +335,24 @@ function ProjectIntegrationsSection({
   const [resourceId, setResourceId] = useState('')
   const [resourceName, setResourceName] = useState('')
   const [error, setError] = useState('')
+  const [retryingRunId, setRetryingRunId] = useState('')
+
+  const retrySync = async (run: SyncRunRecord) => {
+    if (!supabase) return
+    const functionNames: Record<string, string> = { cloudflare: 'cloudflare-billing', github: 'github-sync', cloudinary: 'cloudinary-usage', google_analytics: 'google-analytics-sync', supabase: 'supabase-usage' }
+    const functionName = functionNames[run.provider.toLowerCase()]
+    if (!functionName) return
+    setRetryingRunId(run.id); setError('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke(functionName, { body: { action: 'sync', projectId: project.id } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : `Unable to retry ${run.provider} synchronization.`)
+    } finally {
+      setRetryingRunId('')
+    }
+  }
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -356,7 +375,7 @@ function ProjectIntegrationsSection({
   return <DataSection title={`${project.name} provider resources`}>
     <p className="text-sm text-slate-500">Associations are project-specific. This form records a selected resource; provider credential validation and discovery are separate integrations.</p>
     {integrations.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 p-3"><div><p className="font-medium text-slate-900">{item.provider} · {item.resourceName}</p><p className="text-xs text-slate-500">{item.resourceType} · {item.connectionStatus}{item.lastSyncedAt ? ` · synced ${new Date(item.lastSyncedAt).toLocaleString()}` : ''}</p></div><Button type="button" variant="ghost" size="sm" onClick={async () => { await deleteProjectIntegration(item.id); onDeleted(item.id) }}>Remove</Button></div>)}
-    <div className="space-y-2 border-t border-slate-200 pt-4"><h4 className="font-medium text-slate-900">Sync history</h4>{syncRuns.length ? syncRuns.map((run) => <div key={run.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-3 text-sm"><span className="font-medium text-slate-900">{run.provider} · {run.status}</span><span className="text-slate-500">{run.recordsImported} records · {new Date(run.startedAt).toLocaleString()}{run.errorMessage ? ` · ${run.errorMessage}` : ''}</span></div>) : <p className="text-sm text-slate-500">No synchronization has completed for this project.</p>}</div>
+    <div className="space-y-2 border-t border-slate-200 pt-4"><h4 className="font-medium text-slate-900">Sync history</h4>{syncRuns.length ? syncRuns.map((run) => <div key={run.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-3 text-sm"><div><p className="font-medium text-slate-900">{run.provider} · {run.status}</p><p className="text-slate-500">{run.recordsImported} records · {new Date(run.startedAt).toLocaleString()}{run.errorMessage ? ` · ${run.errorMessage}` : ''}</p></div>{run.status === 'failed' ? <Button type="button" variant="outline" size="sm" onClick={() => void retrySync(run)} disabled={retryingRunId === run.id}>{retryingRunId === run.id ? 'Retrying...' : 'Retry sync'}</Button> : null}</div>) : <p className="text-sm text-slate-500">No synchronization has completed for this project.</p>}</div>
     {error ? <p role="alert" className="text-sm text-rose-700">{error}</p> : null}
     <form className="grid gap-3 md:grid-cols-2" onSubmit={submit}>
       <label className="block"><span className="mb-1 block text-sm text-slate-600">Provider</span><select value={provider} onChange={(event) => setProvider(event.target.value)} className="w-full rounded-md border border-slate-300 px-3 py-2" required><option value="">Select provider</option>{['Supabase', 'Firebase', 'Cloudinary', 'Google Analytics', 'Cloudflare', 'GitHub', 'Vercel', 'Netlify', 'Hostinger', 'Namecheap', 'Other'].map((item) => <option key={item}>{item}</option>)}</select></label>
