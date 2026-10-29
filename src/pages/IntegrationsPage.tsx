@@ -14,10 +14,14 @@ export function IntegrationsPage() {
   const [projectId, setProjectId] = useState('')
   const [accountId, setAccountId] = useState('')
   const [apiToken, setApiToken] = useState('')
+  const [githubToken, setGithubToken] = useState('')
+  const [githubConnection, setGithubConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [connection, setConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [isConnecting, setIsConnecting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isGithubConnecting, setIsGithubConnecting] = useState(false)
+  const [isGithubSyncing, setIsGithubSyncing] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -30,11 +34,14 @@ export function IntegrationsPage() {
     let active = true
     void Promise.all([
       supabase.functions.invoke('cloudflare-billing', { body: { action: 'status' } }),
+      supabase.functions.invoke('github-sync', { body: { action: 'status' } }),
       getProjects(),
-    ]).then(([statusResult, loadedProjects]) => {
+    ]).then(([statusResult, githubStatusResult, loadedProjects]) => {
       if (statusResult.error) throw new Error(statusResult.error.message)
+      if (githubStatusResult.error) throw new Error(githubStatusResult.error.message)
       if (!active) return
       setConnection(statusResult.data as typeof connection)
+      setGithubConnection(githubStatusResult.data as typeof githubConnection)
       setProjects(loadedProjects)
       setProjectId((current) => current || loadedProjects[0]?.id || '')
     }).catch((loadError: unknown) => {
@@ -91,9 +98,49 @@ export function IntegrationsPage() {
     }
   }
 
+  const handleGithubConnect = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase) return
+    setIsGithubConnecting(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('github-sync', { body: { action: 'connect', apiToken: githubToken } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setGithubConnection({ connected: true, accountId: String(data.accountId), lastSyncedAt: null })
+      setGithubToken('')
+      setMessage('GitHub connected. The token was not retained in the browser.')
+    } catch (connectError) {
+      setError(connectError instanceof Error ? connectError.message : 'Unable to connect GitHub.')
+    } finally {
+      setGithubToken('')
+      setIsGithubConnecting(false)
+    }
+  }
+
+  const handleGithubSync = async () => {
+    if (!supabase || !projectId) return
+    setIsGithubSyncing(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('github-sync', { body: { action: 'sync', projectId } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setGithubConnection((current) => ({ ...current, lastSyncedAt: new Date().toISOString() }))
+      setMessage(`Imported ${Number(data.imported ?? 0)} GitHub deployment records.`)
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : 'Unable to sync GitHub deployments.')
+    } finally {
+      setIsGithubSyncing(false)
+    }
+  }
+
   const integrations = [
     { name: 'Supabase', status: isDemoMode ? 'Demo mode' : 'Connected', health: isDemoMode ? 'Demo' : 'Healthy', lastSync: isDemoMode ? 'Not syncing' : 'Live query' },
     { name: 'Cloudflare Billing', status: connection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : connection.connected ? 'Ready' : 'Unavailable', lastSync: connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : 'Never' },
+    { name: 'GitHub Deployments', status: githubConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : githubConnection.connected ? 'Ready' : 'Unavailable', lastSync: githubConnection.lastSyncedAt ? new Date(githubConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Google Analytics', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
     { name: 'Cloudflare', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
     { name: 'Telegram', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
@@ -157,6 +204,20 @@ export function IntegrationsPage() {
                 <Button type="button" onClick={() => void handleSync()} disabled={isSyncing || !projectId}>{isSyncing ? 'Syncing...' : 'Sync billing history'}</Button>
               </div>
             ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isDemoMode ? (
+        <Card>
+          <CardHeader><CardTitle>GitHub repository and deployments</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">Use a fine-grained GitHub token with repository metadata and Actions read access. The token is validated and encrypted server-side.</p>
+            <form className="grid gap-4 md:grid-cols-[1fr_auto]" onSubmit={handleGithubConnect}>
+              <input type="password" autoComplete="new-password" value={githubToken} onChange={(event) => setGithubToken(event.target.value)} placeholder="GitHub token" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <Button type="submit" disabled={isGithubConnecting || isLoading}>{isGithubConnecting ? 'Connecting...' : githubConnection.connected ? 'Replace GitHub connection' : 'Connect GitHub'}</Button>
+            </form>
+            {githubConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync repository for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleGithubSync()} disabled={isGithubSyncing || !projectId}>{isGithubSyncing ? 'Syncing...' : 'Sync GitHub deployments'}</Button></div> : null}
           </CardContent>
         </Card>
       ) : null}
