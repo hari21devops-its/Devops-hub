@@ -34,12 +34,14 @@ async function metrics(projectRef: string, secretKey: string) {
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return response({ error: 'Method not allowed.' }, 405)
+  let syncRunId: string | null = null
+  let adminClient: ReturnType<typeof createClient> | null = null
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL'); const anonKey = Deno.env.get('SUPABASE_ANON_KEY'); const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'); const authorization = request.headers.get('Authorization')
     if (!supabaseUrl || !anonKey || !serviceRoleKey) throw new Error('Supabase function secrets are not configured.')
     if (!authorization) return response({ error: 'Sign in is required.' }, 401)
     const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authorization } } }); const { data: { user }, error: authError } = await userClient.auth.getUser(); if (authError || !user) return response({ error: 'The current session is invalid.' }, 401)
-    const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } }); const body = await request.json(); const action = String(body.action ?? '')
+    const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } }); adminClient = admin; const body = await request.json(); const action = String(body.action ?? '')
     const { data: connection } = await admin.from('provider_connections').select('account_id, encrypted_token, token_iv, last_synced_at').eq('owner_id', user.id).eq('provider', 'supabase').maybeSingle()
     if (action === 'status') return response({ connected: Boolean(connection), projectRef: connection?.account_id ?? null, lastSyncedAt: connection?.last_synced_at ?? null })
     if (action === 'connect') {
@@ -53,6 +55,7 @@ Deno.serve(async (request) => {
     if (action === 'sync') {
       const projectId = String(body.projectId ?? '').trim(); if (!projectId || !connection) return response({ error: 'Choose a project and connect Supabase before syncing.' }, 400)
       const { data: project } = await admin.from('projects').select('id').eq('id', projectId).eq('owner_id', user.id).maybeSingle(); if (!project) return response({ error: 'Project not found for this account.' }, 404)
+      const { data: syncRun, error: syncRunError } = await admin.from('sync_runs').insert({ project_id: projectId, provider: 'supabase', status: 'running' }).select('id').single(); if (syncRunError || !syncRun) throw new Error('Unable to start the Supabase synchronization record.'); syncRunId = String(syncRun.id)
       const stored = JSON.parse(await decrypt(String(connection.encrypted_token), String(connection.token_iv))) as { databaseUrl?: string; metricsSecretKey?: string }
       if (!stored.databaseUrl || !stored.metricsSecretKey) throw new Error('Replace the Supabase connection with a Secret API key to enable bandwidth and egress metrics.')
       const size = await databaseSize(stored.databaseUrl); const metricsText = await metrics(String(connection.account_id), stored.metricsSecretKey); const syncedAt = new Date().toISOString()
@@ -70,8 +73,9 @@ Deno.serve(async (request) => {
       const { error } = await admin.from('provider_usage_snapshots').insert(rowsWithLimits)
       if (error) throw new Error('Supabase usage was fetched, but the snapshot could not be saved.')
       await admin.from('provider_connections').update({ last_synced_at: syncedAt }).eq('owner_id', user.id).eq('provider', 'supabase')
+      await admin.from('sync_runs').update({ status: 'succeeded', completed_at: syncedAt, records_imported: rowsWithLimits.length }).eq('id', syncRunId)
       return response({ imported: usageRows.length, bytes: size, bandwidth: egress, projectRef: connection.account_id })
     }
     return response({ error: 'Unsupported action.' }, 400)
-  } catch (error) { return response({ error: error instanceof Error ? error.message : 'Supabase usage operation failed.' }, 500) }
+  } catch (error) { if (syncRunId && adminClient) await adminClient.from('sync_runs').update({ status: 'failed', completed_at: new Date().toISOString(), error_message: error instanceof Error ? error.message : 'Supabase usage operation failed.' }).eq('id', syncRunId); return response({ error: error instanceof Error ? error.message : 'Supabase usage operation failed.' }, 500) }
 })
