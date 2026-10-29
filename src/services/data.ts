@@ -619,14 +619,15 @@ export async function getSyncRuns(projectId: string, limit = 20): Promise<SyncRu
   }))
 }
 
-export async function getProviderUsageSnapshots(projectId: string): Promise<ProviderUsageSnapshot[]> {
+export async function getProviderUsageSnapshots(projectId?: string): Promise<ProviderUsageSnapshot[]> {
   if (!supabase) return []
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('provider_usage_snapshots')
     .select('id, project_id, provider, metric, value, unit, period_start, period_end, synced_at')
-    .eq('project_id', projectId)
     .order('synced_at', { ascending: false })
+  if (projectId) query = query.eq('project_id', projectId)
+  const { data, error } = await query
   if (error) throw new Error(error.message)
 
   return (data ?? []).map((record) => ({

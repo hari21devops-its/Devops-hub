@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react'
 import { Badge } from '../components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { useAuth } from '../contexts/AuthContext'
-import { getServices } from '../services/data'
+import { getProviderUsageSnapshots, getServices } from '../services/data'
+import type { ProviderUsageSnapshot } from '../services/data'
 import type { Service } from '../types'
 
 const quotaData = [
@@ -23,6 +24,7 @@ const usageSummary = [
 export function UsagePage() {
   const { isDemoMode } = useAuth()
   const [services, setServices] = useState<Service[]>([])
+  const [snapshots, setSnapshots] = useState<ProviderUsageSnapshot[]>([])
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [error, setError] = useState('')
 
@@ -36,9 +38,9 @@ export function UsagePage() {
 
     let active = true
     setIsLoading(true)
-    void getServices()
-      .then((items) => {
-        if (active) setServices(items)
+    void Promise.all([getServices(), getProviderUsageSnapshots()])
+      .then(([items, usageSnapshots]) => {
+        if (active) { setServices(items); setSnapshots(usageSnapshots) }
       })
       .catch((loadError: unknown) => {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load service usage.')
@@ -58,20 +60,30 @@ export function UsagePage() {
     return Math.max(highest, ratio)
   }, 0)
   const recurringCost = services.filter((service) => service.isPaid).reduce((sum, service) => sum + service.monthlyCost, 0)
+  const liveUsageCount = services.length + snapshots.length
   const liveSummary = [
-    { label: 'Tracked services', value: String(services.length), tone: 'neutral' as const },
+    { label: 'Tracked services', value: String(liveUsageCount), tone: 'neutral' as const },
     { label: 'Near quota', value: String(nearQuotaServices.length), tone: nearQuotaServices.length ? 'warning' as const : 'success' as const },
     { label: 'Recurring cost', value: `${services.find((service) => service.isPaid)?.currency ?? 'INR'} ${recurringCost.toLocaleString()}`, tone: 'neutral' as const },
     { label: 'Highest utilization', value: `${Math.round(highestUsage * 100)}%`, tone: highestUsage >= 0.85 ? 'warning' as const : 'success' as const },
   ]
   const displayedSummary = isDemoMode ? usageSummary : liveSummary
-  const displayedQuotas = isDemoMode ? quotaData : services.map((service) => ({
-    name: service.name,
-    current: service.currentUsage,
-    limit: service.usageLimit,
-    unit: service.usageUnit,
-    status: service.usageLimit > 0 && service.currentUsage / service.usageLimit >= 0.85 ? 'Warning' : 'Healthy',
-  }))
+  const displayedQuotas = isDemoMode ? quotaData : [
+    ...services.map((service) => ({
+      name: service.name,
+      current: service.currentUsage,
+      limit: service.usageLimit,
+      unit: service.usageUnit,
+      status: service.usageLimit > 0 && service.currentUsage / service.usageLimit >= 0.85 ? 'Warning' : 'Healthy',
+    })),
+    ...snapshots.map((snapshot) => ({
+      name: `${snapshot.provider} ${snapshot.metric.replaceAll('_', ' ')}`,
+      current: snapshot.value,
+      limit: 0,
+      unit: snapshot.unit,
+      status: 'Healthy',
+    })),
+  ]
 
   return (
     <div className="space-y-6">
