@@ -370,6 +370,7 @@ export function IntegrationsPage() {
     { name: 'Cloudinary Usage', status: cloudinaryConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : cloudinaryConnection.connected ? 'Ready' : 'Unavailable', lastSync: cloudinaryConnection.lastSyncedAt ? new Date(cloudinaryConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Google Analytics', status: analyticsConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : analyticsConnection.connected ? 'Ready' : 'Unavailable', lastSync: analyticsConnection.lastSyncedAt ? new Date(analyticsConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Supabase Usage', status: supabaseUsageConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : supabaseUsageConnection.connected ? 'Ready' : 'Unavailable', lastSync: supabaseUsageConnection.lastSyncedAt ? new Date(supabaseUsageConnection.lastSyncedAt).toLocaleString() : 'Never' },
+    { name: 'Firebase Usage', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
   ]
 
   return (
