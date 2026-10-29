@@ -30,6 +30,7 @@ export function IntegrationsPage() {
   const [analyticsConnection, setAnalyticsConnection] = useState<{ connected: boolean; propertyId: string | null; lastSyncedAt: string | null }>({ connected: false, propertyId: null, lastSyncedAt: null })
   const [supabaseProjectRef, setSupabaseProjectRef] = useState('')
   const [supabaseDatabaseUrl, setSupabaseDatabaseUrl] = useState('')
+  const [supabaseMetricsSecretKey, setSupabaseMetricsSecretKey] = useState('')
   const [supabaseUsageConnection, setSupabaseUsageConnection] = useState<{ connected: boolean; projectRef: string | null; lastSyncedAt: string | null }>({ connected: false, projectRef: null, lastSyncedAt: null })
   const [connection, setConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [isLoading, setIsLoading] = useState(!isDemoMode)
@@ -340,12 +341,12 @@ export function IntegrationsPage() {
     if (!supabase) return
     setIsSupabaseUsageConnecting(true); setError(''); setMessage('')
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke('supabase-usage', { body: { action: 'connect', projectRef: supabaseProjectRef, databaseUrl: supabaseDatabaseUrl } })
+      const { data, error: invokeError } = await supabase.functions.invoke('supabase-usage', { body: { action: 'connect', projectRef: supabaseProjectRef, databaseUrl: supabaseDatabaseUrl, metricsSecretKey: supabaseMetricsSecretKey } })
       if (invokeError) throw new Error(invokeError.message)
       if (data?.error) throw new Error(String(data.error))
-      setSupabaseUsageConnection({ connected: true, projectRef: String(data.projectRef), lastSyncedAt: null }); setSupabaseDatabaseUrl(''); setMessage('Supabase usage connection validated. The database URL was not retained in the browser.')
+      setSupabaseUsageConnection({ connected: true, projectRef: String(data.projectRef), lastSyncedAt: null }); setSupabaseDatabaseUrl(''); setSupabaseMetricsSecretKey(''); setMessage('Supabase usage connection validated. Credentials were not retained in the browser.')
     } catch (connectError) { setError(connectError instanceof Error ? connectError.message : 'Unable to connect Supabase usage.') }
-    finally { setSupabaseDatabaseUrl(''); setIsSupabaseUsageConnecting(false) }
+    finally { setSupabaseDatabaseUrl(''); setSupabaseMetricsSecretKey(''); setIsSupabaseUsageConnecting(false) }
   }
 
   const handleSupabaseUsageSync = async () => {
@@ -497,10 +498,11 @@ export function IntegrationsPage() {
         <Card>
           <CardHeader><CardTitle>Supabase usage</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-slate-500">Connect a Supabase PostgreSQL database to import current database size for the selected project. The database URL is encrypted server-side.</p>
-            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleSupabaseUsageConnect}>
+            <p className="text-sm text-slate-500">Connect a Supabase PostgreSQL database and Metrics API Secret API key to import database storage, bandwidth, and egress for the selected project. Credentials are encrypted server-side.</p>
+            <form className="grid gap-4 md:grid-cols-4" onSubmit={handleSupabaseUsageConnect}>
               <input value={supabaseProjectRef} onChange={(event) => setSupabaseProjectRef(event.target.value)} placeholder="Supabase project ref" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required pattern="[a-z0-9]{20}" />
               <input type="password" autoComplete="new-password" value={supabaseDatabaseUrl} onChange={(event) => setSupabaseDatabaseUrl(event.target.value)} placeholder="PostgreSQL connection URL" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <input type="password" autoComplete="new-password" value={supabaseMetricsSecretKey} onChange={(event) => setSupabaseMetricsSecretKey(event.target.value)} placeholder="Secret API key (sb_secret_...)" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
               <Button type="submit" disabled={isSupabaseUsageConnecting || isLoading}>{isSupabaseUsageConnecting ? 'Connecting...' : supabaseUsageConnection.connected ? 'Replace Supabase connection' : 'Connect Supabase usage'}</Button>
             </form>
             {supabaseUsageConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync database usage for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleSupabaseUsageSync()} disabled={isSupabaseUsageSyncing || !projectId}>{isSupabaseUsageSyncing ? 'Syncing...' : 'Sync database usage'}</Button></div> : null}
