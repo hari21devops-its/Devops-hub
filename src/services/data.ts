@@ -651,6 +651,17 @@ export async function getProviderUsageSnapshots(projectId?: string): Promise<Pro
   }))
 }
 
+export async function updateProviderUsageLimit(snapshot: ProviderUsageSnapshot): Promise<void> {
+  if (!supabase) return
+  const { error } = await supabase.from('provider_usage_snapshots').update({
+    limit_value: snapshot.limitValue,
+    limit_unit: snapshot.limitUnit,
+    overage_rate: snapshot.overageRate,
+    overage_currency: snapshot.overageCurrency,
+  }).eq('id', snapshot.id).eq('project_id', snapshot.projectId)
+  if (error) throw new Error(error.message)
+}
+
 export async function createProjectIntegration(integration: Omit<ProjectIntegrationRecord, 'id' | 'lastSyncedAt'>): Promise<ProjectIntegrationRecord> {
   if (!supabase) {
     const saved = { ...integration, id: `int-${Date.now()}`, lastSyncedAt: null }

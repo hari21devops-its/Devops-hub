@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 
 import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { useAuth } from '../contexts/AuthContext'
-import { getDomains, getProjects, getProviderUsageSnapshots, getServices } from '../services/data'
+import { getDomains, getProjects, getProviderUsageSnapshots, getServices, updateProviderUsageLimit } from '../services/data'
 import type { ProviderUsageSnapshot } from '../services/data'
 import type { Domain, Project, Service } from '../types'
 import { formatUsageValue } from '../lib/utils'
@@ -21,6 +22,18 @@ const usageSummary = [
   { label: 'Approaching cap', value: '2 services', tone: 'warning' },
   { label: 'Forecast', value: '₹8.4K', tone: 'neutral' },
 ] as const
+
+function UsageSnapshotCard({ snapshot }: { snapshot: ProviderUsageSnapshot }) {
+  const [draft, setDraft] = useState(snapshot)
+  const [isSaving, setIsSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  useEffect(() => { setDraft(snapshot) }, [snapshot])
+  const save = async () => {
+    setIsSaving(true); setMessage('')
+    try { await updateProviderUsageLimit(draft); setMessage('Saved') } catch { setMessage('Unable to save') } finally { setIsSaving(false) }
+  }
+  return <div className="rounded-md bg-slate-50 p-3"><p className="text-xs capitalize text-slate-500">{snapshot.metric.replaceAll('_', ' ')}</p><p className="mt-1 font-semibold text-slate-900">{formatUsageValue(snapshot.value, snapshot.unit)}</p><div className="mt-2 grid gap-2 sm:grid-cols-5"><input type="number" min="0" value={draft.limitValue ?? ''} onChange={(event) => setDraft({ ...draft, limitValue: event.target.value ? Number(event.target.value) : null })} placeholder="Limit" className="rounded border border-slate-300 px-2 py-1 text-xs" /><input value={draft.limitUnit ?? ''} onChange={(event) => setDraft({ ...draft, limitUnit: event.target.value || null })} placeholder="Unit" className="rounded border border-slate-300 px-2 py-1 text-xs" /><input type="number" min="0" value={draft.overageRate ?? ''} onChange={(event) => setDraft({ ...draft, overageRate: event.target.value ? Number(event.target.value) : null })} placeholder="Overage rate" className="rounded border border-slate-300 px-2 py-1 text-xs" /><input value={draft.overageCurrency ?? ''} onChange={(event) => setDraft({ ...draft, overageCurrency: event.target.value || null })} placeholder="Currency" className="rounded border border-slate-300 px-2 py-1 text-xs" /><Button type="button" size="sm" variant="outline" onClick={() => void save()} disabled={isSaving}>{message || 'Set limit'}</Button></div></div>
+}
 
 export function UsagePage() {
   const { isDemoMode } = useAuth()
@@ -177,7 +190,7 @@ export function UsagePage() {
         {projectUsage.length === 0 ? <Card><CardContent className="p-5 text-sm text-slate-400">No projects with live usage data yet.</CardContent></Card> : projectUsage.map(({ project, snapshots: projectSnapshots, services: projectServices, domains: projectDomains }) => {
           const providers = [...new Set([...projectSnapshots.map((item) => item.provider), ...projectServices.map((item) => item.provider)])]
           return <Card key={project.id}><CardHeader><CardTitle>{project.name}</CardTitle></CardHeader><CardContent className="space-y-4">
-            {providers.length ? providers.map((provider) => <div key={provider} className="rounded-lg border border-slate-200 p-4"><h4 className="font-medium text-slate-900">{provider}</h4><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{projectSnapshots.filter((item) => item.provider === provider).map((item) => <div key={`${item.provider}-${item.metric}`} className="rounded-md bg-slate-50 p-3"><p className="text-xs capitalize text-slate-500">{item.metric.replaceAll('_', ' ')}</p><p className="mt-1 font-semibold text-slate-900">{formatUsageValue(item.value, item.unit)}</p>{item.limitValue != null ? <p className="mt-1 text-xs text-slate-500">Limit: {formatUsageValue(item.limitValue, item.limitUnit ?? item.unit)}{item.overageRate != null ? ` · ${item.overageCurrency ?? ''} ${item.overageRate}/unit over limit` : ''}</p> : null}</div>)}{projectServices.filter((item) => item.provider === provider).map((item) => <div key={item.id} className="rounded-md bg-slate-50 p-3"><p className="text-xs text-slate-500">{item.name}</p><p className="mt-1 font-semibold text-slate-900">{item.currentUsage.toLocaleString()} {item.usageUnit}{item.usageLimit ? ` / ${item.usageLimit.toLocaleString()}` : ''}</p></div>)}</div></div>) : <p className="text-sm text-slate-500">No provider usage synchronized for this project.</p>}
+            {providers.length ? providers.map((provider) => <div key={provider} className="rounded-lg border border-slate-200 p-4"><h4 className="font-medium text-slate-900">{provider}</h4><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{projectSnapshots.filter((item) => item.provider === provider).map((item) => <UsageSnapshotCard key={`${item.provider}-${item.metric}`} snapshot={item} />)}{projectServices.filter((item) => item.provider === provider).map((item) => <div key={item.id} className="rounded-md bg-slate-50 p-3"><p className="text-xs text-slate-500">{item.name}</p><p className="mt-1 font-semibold text-slate-900">{item.currentUsage.toLocaleString()} {item.usageUnit}{item.usageLimit ? ` / ${item.usageLimit.toLocaleString()}` : ''}</p></div>)}</div></div>) : <p className="text-sm text-slate-500">No provider usage synchronized for this project.</p>}
             <div className="rounded-lg border border-slate-200 p-4"><h4 className="font-medium text-slate-900">Domains</h4>{projectDomains.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{projectDomains.map((domain) => <div key={domain.id} className="rounded-md bg-slate-50 p-3"><p className="font-medium text-slate-900">{domain.name}</p><p className="mt-1 text-sm text-slate-500">DNS: {domain.dnsProvider || 'Unavailable'} · SSL: {domain.sslStatus}</p></div>)}</div> : <p className="mt-2 text-sm text-slate-500">No domains associated with this project.</p>}</div>
           </CardContent></Card>
         })}
