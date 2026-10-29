@@ -32,6 +32,9 @@ export function IntegrationsPage() {
   const [supabaseDatabaseUrl, setSupabaseDatabaseUrl] = useState('')
   const [supabaseMetricsSecretKey, setSupabaseMetricsSecretKey] = useState('')
   const [supabaseUsageConnection, setSupabaseUsageConnection] = useState<{ connected: boolean; projectRef: string | null; lastSyncedAt: string | null }>({ connected: false, projectRef: null, lastSyncedAt: null })
+  const [firebaseProjectId, setFirebaseProjectId] = useState('')
+  const [firebaseAccessToken, setFirebaseAccessToken] = useState('')
+  const [firebaseConnection, setFirebaseConnection] = useState<{ connected: boolean; projectId: string | null; lastSyncedAt: string | null }>({ connected: false, projectId: null, lastSyncedAt: null })
   const [connection, setConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -47,6 +50,7 @@ export function IntegrationsPage() {
   const [isAnalyticsSyncing, setIsAnalyticsSyncing] = useState(false)
   const [isSupabaseUsageConnecting, setIsSupabaseUsageConnecting] = useState(false)
   const [isSupabaseUsageSyncing, setIsSupabaseUsageSyncing] = useState(false)
+  const [isFirebaseConnecting, setIsFirebaseConnecting] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -73,8 +77,9 @@ export function IntegrationsPage() {
       readStatus('cloudinary-usage'),
       readStatus('google-analytics-sync'),
       readStatus('supabase-usage'),
+      readStatus('firebase-usage'),
       getProjects(),
-    ]).then(([statusResult, githubStatusResult, telegramStatusResult, cloudinaryStatusResult, analyticsStatusResult, supabaseUsageStatusResult, loadedProjects]) => {
+    ]).then(([statusResult, githubStatusResult, telegramStatusResult, cloudinaryStatusResult, analyticsStatusResult, supabaseUsageStatusResult, firebaseStatusResult, loadedProjects]) => {
       if (!active) return
       if (statusResult.data) setConnection(statusResult.data as typeof connection)
       if (githubStatusResult.data) setGithubConnection(githubStatusResult.data as typeof githubConnection)
@@ -82,6 +87,7 @@ export function IntegrationsPage() {
       if (cloudinaryStatusResult.data) setCloudinaryConnection(cloudinaryStatusResult.data as typeof cloudinaryConnection)
       if (analyticsStatusResult.data) setAnalyticsConnection(analyticsStatusResult.data as typeof analyticsConnection)
       if (supabaseUsageStatusResult.data) setSupabaseUsageConnection(supabaseUsageStatusResult.data as typeof supabaseUsageConnection)
+      if (firebaseStatusResult.data) setFirebaseConnection(firebaseStatusResult.data as typeof firebaseConnection)
       setProjects(loadedProjects)
       setProjectId((current) => current || loadedProjects[0]?.id || '')
       const failures = [
@@ -91,6 +97,7 @@ export function IntegrationsPage() {
         cloudinaryStatusResult.error ? `Cloudinary: ${cloudinaryStatusResult.error}` : '',
         analyticsStatusResult.error ? `Google Analytics: ${analyticsStatusResult.error}` : '',
         supabaseUsageStatusResult.error ? `Supabase usage: ${supabaseUsageStatusResult.error}` : '',
+        firebaseStatusResult.error ? `Firebase: ${firebaseStatusResult.error}` : '',
       ].filter(Boolean)
       if (failures.length) setError(`Integration status unavailable. ${failures.join(' | ')}`)
     }).catch((loadError: unknown) => {
@@ -361,6 +368,19 @@ export function IntegrationsPage() {
     finally { setIsSupabaseUsageSyncing(false) }
   }
 
+  const handleFirebaseConnect = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase) return
+    setIsFirebaseConnecting(true); setError(''); setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('firebase-usage', { body: { action: 'connect', projectId: firebaseProjectId, accessToken: firebaseAccessToken } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setFirebaseConnection({ connected: true, projectId: String(data.projectId), lastSyncedAt: null }); setFirebaseAccessToken(''); setMessage('Firebase project validated. Usage metrics still require Cloud Monitoring access.')
+    } catch (connectError) { setError(connectError instanceof Error ? connectError.message : 'Unable to connect Firebase.') }
+    finally { setFirebaseAccessToken(''); setIsFirebaseConnecting(false) }
+  }
+
   const integrations = [
     { name: 'Supabase', status: isDemoMode ? 'Demo mode' : 'Connected', health: isDemoMode ? 'Demo' : 'Healthy', lastSync: isDemoMode ? 'Not syncing' : 'Live query' },
     { name: 'Cloudflare Billing', status: connection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : connection.connected ? 'Ready' : 'Unavailable', lastSync: connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : 'Never' },
@@ -370,7 +390,7 @@ export function IntegrationsPage() {
     { name: 'Cloudinary Usage', status: cloudinaryConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : cloudinaryConnection.connected ? 'Ready' : 'Unavailable', lastSync: cloudinaryConnection.lastSyncedAt ? new Date(cloudinaryConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Google Analytics', status: analyticsConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : analyticsConnection.connected ? 'Ready' : 'Unavailable', lastSync: analyticsConnection.lastSyncedAt ? new Date(analyticsConnection.lastSyncedAt).toLocaleString() : 'Never' },
     { name: 'Supabase Usage', status: supabaseUsageConnection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : supabaseUsageConnection.connected ? 'Ready' : 'Unavailable', lastSync: supabaseUsageConnection.lastSyncedAt ? new Date(supabaseUsageConnection.lastSyncedAt).toLocaleString() : 'Never' },
-    { name: 'Firebase Usage', status: 'Not configured', health: 'Unavailable', lastSync: 'Never' },
+    { name: 'Firebase Usage', status: firebaseConnection.connected ? 'Connected' : 'Not configured', health: firebaseConnection.connected ? 'Ready' : 'Unavailable', lastSync: firebaseConnection.lastSyncedAt ? new Date(firebaseConnection.lastSyncedAt).toLocaleString() : 'Never' },
   ]
 
   return (
@@ -507,6 +527,20 @@ export function IntegrationsPage() {
               <Button type="submit" disabled={isSupabaseUsageConnecting || isLoading}>{isSupabaseUsageConnecting ? 'Connecting...' : supabaseUsageConnection.connected ? 'Replace Supabase connection' : 'Connect Supabase usage'}</Button>
             </form>
             {supabaseUsageConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync database usage for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleSupabaseUsageSync()} disabled={isSupabaseUsageSyncing || !projectId}>{isSupabaseUsageSyncing ? 'Syncing...' : 'Sync database usage'}</Button></div> : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!isDemoMode ? (
+        <Card>
+          <CardHeader><CardTitle>Firebase usage</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">Validate a Firebase project with a Google access token. Firebase bandwidth and storage metrics require Cloud Monitoring permissions and remain unavailable until configured.</p>
+            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleFirebaseConnect}>
+              <input value={firebaseProjectId} onChange={(event) => setFirebaseProjectId(event.target.value)} placeholder="Firebase project ID" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <input type="password" autoComplete="new-password" value={firebaseAccessToken} onChange={(event) => setFirebaseAccessToken(event.target.value)} placeholder="Google access token" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
+              <Button type="submit" disabled={isFirebaseConnecting || isLoading}>{isFirebaseConnecting ? 'Validating...' : firebaseConnection.connected ? 'Replace Firebase connection' : 'Connect Firebase'}</Button>
+            </form>
           </CardContent>
         </Card>
       ) : null}

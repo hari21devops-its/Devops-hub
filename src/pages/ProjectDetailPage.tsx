@@ -33,6 +33,7 @@ import {
   type SyncRunRecord,
 } from '../services/data'
 import type { Domain, Project, Service } from '../types'
+import { formatUsageValue } from '../lib/utils'
 
 const projectTabs = [
   ['Overview', ''],
@@ -151,7 +152,7 @@ export function ProjectOverviewPage() {
   const provider = (type: string) => integrations.find((item) => item.resourceType.toLowerCase() === type)?.resourceName ?? (type === 'database' && usageSnapshots.some((item) => item.provider === 'Supabase' && item.metric === 'database_storage') ? 'Supabase' : 'Not connected')
   const usageMetric = (metric: string) => {
     const snapshot = usageSnapshots.find((item) => item.metric.toLowerCase() === metric || (metric === 'database_usage' && item.metric.toLowerCase() === 'database_storage'))
-    return snapshot ? `${snapshot.value.toLocaleString()} ${snapshot.unit}` : 'Unavailable'
+    return snapshot ? formatUsageValue(snapshot.value, snapshot.unit) : 'Unavailable'
   }
 
   return (

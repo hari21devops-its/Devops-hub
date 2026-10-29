@@ -79,6 +79,10 @@ export type ProviderUsageSnapshot = {
   periodStart: string | null
   periodEnd: string | null
   syncedAt: string
+  limitValue: number | null
+  limitUnit: string | null
+  overageRate: number | null
+  overageCurrency: string | null
 }
 
 export type ExpenseRecord = {
@@ -624,7 +628,7 @@ export async function getProviderUsageSnapshots(projectId?: string): Promise<Pro
 
   let query = supabase
     .from('provider_usage_snapshots')
-    .select('id, project_id, provider, metric, value, unit, period_start, period_end, synced_at')
+    .select('id, project_id, provider, metric, value, unit, period_start, period_end, synced_at, limit_value, limit_unit, overage_rate, overage_currency')
     .order('synced_at', { ascending: false })
   if (projectId) query = query.eq('project_id', projectId)
   const { data, error } = await query
@@ -640,6 +644,10 @@ export async function getProviderUsageSnapshots(projectId?: string): Promise<Pro
     periodStart: record.period_start ? String(record.period_start) : null,
     periodEnd: record.period_end ? String(record.period_end) : null,
     syncedAt: String(record.synced_at),
+    limitValue: record.limit_value == null ? null : Number(record.limit_value),
+    limitUnit: record.limit_unit ? String(record.limit_unit) : null,
+    overageRate: record.overage_rate == null ? null : Number(record.overage_rate),
+    overageCurrency: record.overage_currency ? String(record.overage_currency) : null,
   }))
 }
 
