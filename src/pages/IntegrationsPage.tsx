@@ -39,8 +39,12 @@ export function IntegrationsPage() {
     let active = true
     const client = supabase
     const readStatus = async (functionName: string) => {
-      const result = await client.functions.invoke(functionName, { body: { action: 'status' } })
-      return { data: result.data, error: result.error?.message ?? null }
+      try {
+        const result = await client.functions.invoke(functionName, { body: { action: 'status' } })
+        return { data: result.data, error: result.error?.message ?? null }
+      } catch (statusError) {
+        return { data: null, error: statusError instanceof Error ? statusError.message : 'Unknown provider status error.' }
+      }
     }
     void Promise.all([
       readStatus('cloudflare-billing'),
