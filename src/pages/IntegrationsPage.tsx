@@ -196,6 +196,24 @@ export function IntegrationsPage() {
     }
   }
 
+  const handleTelegramTest = async () => {
+    if (!supabase) return
+    setIsTelegramSending(true)
+    setError('')
+    setMessage('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('telegram-notify', { body: { action: 'send_test' } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      setTelegramConnection((current) => ({ ...current, lastSyncedAt: new Date().toISOString() }))
+      setMessage('Telegram test message sent.')
+    } catch (testError) {
+      setError(testError instanceof Error ? testError.message : 'Unable to send the Telegram test message.')
+    } finally {
+      setIsTelegramSending(false)
+    }
+  }
+
   const integrations = [
     { name: 'Supabase', status: isDemoMode ? 'Demo mode' : 'Connected', health: isDemoMode ? 'Demo' : 'Healthy', lastSync: isDemoMode ? 'Not syncing' : 'Live query' },
     { name: 'Cloudflare Billing', status: connection.connected ? 'Connected' : 'Not configured', health: error ? 'Needs attention' : connection.connected ? 'Ready' : 'Unavailable', lastSync: connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString() : 'Never' },
@@ -291,7 +309,7 @@ export function IntegrationsPage() {
               <input value={telegramChatId} onChange={(event) => setTelegramChatId(event.target.value)} placeholder="Chat ID" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
               <Button type="submit" disabled={isTelegramConnecting || isLoading}>{isTelegramConnecting ? 'Connecting...' : telegramConnection.connected ? 'Replace Telegram connection' : 'Connect Telegram'}</Button>
             </form>
-            {telegramConnection.connected ? <Button type="button" variant="outline" onClick={() => void handleTelegramSend()} disabled={isTelegramSending}>{isTelegramSending ? 'Sending...' : 'Send pending alerts'}</Button> : null}
+            {telegramConnection.connected ? <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void handleTelegramTest()} disabled={isTelegramSending}>{isTelegramSending ? 'Sending...' : 'Send test message'}</Button><Button type="button" variant="outline" onClick={() => void handleTelegramSend()} disabled={isTelegramSending}>Send pending alerts</Button></div> : null}
           </CardContent>
         </Card>
       ) : null}

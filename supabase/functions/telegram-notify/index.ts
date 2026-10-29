@@ -122,6 +122,17 @@ Deno.serve(async (request) => {
       return jsonResponse({ sent })
     }
 
+    if (action === 'send_test') {
+      if (!connection) return jsonResponse({ error: 'Connect Telegram before sending a test message.' }, 404)
+      const token = await decryptToken(connection.encrypted_token, connection.token_iv)
+      await telegramRequest(token, 'sendMessage', {
+        chat_id: connection.account_id,
+        text: 'DevOps Hub Telegram connection test succeeded.',
+      })
+      await admin.from('provider_connections').update({ last_synced_at: new Date().toISOString() }).eq('owner_id', user.id).eq('provider', 'telegram')
+      return jsonResponse({ sent: 1 })
+    }
+
     return jsonResponse({ error: 'Unsupported action.' }, 400)
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : 'Telegram operation failed.' }, 500)
