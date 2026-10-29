@@ -19,6 +19,7 @@ import {
   getProviderUsageSnapshots,
   getProjects,
   getSyncRuns,
+  updateProject,
   getServices,
   type AnalyticsDailyRecord,
   type DeploymentRecord,
@@ -47,7 +48,7 @@ const projectTabs = [
   ['Settings', 'settings'],
 ] as const
 
-type ProjectContext = { project: Project }
+type ProjectContext = { project: Project; onProjectUpdated: (project: Project) => void }
 
 export function ProjectDetailLayout() {
   const { projectId = '' } = useParams()
@@ -93,13 +94,17 @@ export function ProjectDetailLayout() {
           </NavLink>
         ))}
       </nav>
-      <Outlet context={{ project } satisfies ProjectContext} />
+      <Outlet context={{ project, onProjectUpdated: (updatedProject: Project) => setProject(updatedProject) } satisfies ProjectContext} />
     </div>
   )
 }
 
 function useProjectContext() {
   return useOutletContext<ProjectContext>().project
+}
+
+function useProjectActions() {
+  return useOutletContext<ProjectContext>().onProjectUpdated
 }
 
 export function ProjectOverviewPage() {
@@ -200,6 +205,7 @@ export function ProjectOverviewPage() {
 
 export function ProjectSectionPage() {
   const project = useProjectContext()
+  const onProjectUpdated = useProjectActions()
   const { section = '' } = useParams()
   const [domains, setDomains] = useState<Domain[]>([])
   const [domainChecks, setDomainChecks] = useState<DomainCheckRecord[]>([])
@@ -251,7 +257,7 @@ export function ProjectSectionPage() {
   if (section === 'errors') return <DataSection title={`${project.name} errors`}>{errors.length ? errors.map((item) => <RecordRow key={item.id} title={item.title} details={`${item.severity ?? 'Severity unavailable'} · ${item.occurrences} occurrences · last seen ${item.lastSeenAt}`} />) : empty('No error events synced for this project.')}</DataSection>
   if (section === 'expenses') return <DataSection title={`${project.name} expenses`}>{expenses.length ? expenses.map((item) => <RecordRow key={item.id} title={`${item.provider || item.service || 'Expense'} · ${item.currency} ${item.amount}`} details={`${item.billingPeriod || 'Period unavailable'} · ${item.paymentStatus}`} />) : empty('No expenses recorded for this project.')}</DataSection>
   if (section === 'integrations') return <ProjectIntegrationsSection project={project} integrations={integrations} syncRuns={syncRuns} onSaved={(item) => setIntegrations((current) => [...current, item])} onDeleted={(id) => setIntegrations((current) => current.filter((item) => item.id !== id))} />
-  if (section === 'settings') return <DataSection title={`${project.name} settings`}><RecordRow title="Project name" details={project.name} /><RecordRow title="Website" details={project.websiteUrl || 'Not configured'} /><RecordRow title="Description" details={project.description || 'Not provided'} /><p className="text-sm text-slate-500">Edit project details from the <Link className="text-sky-700 underline" to="/projects">Projects</Link> page.</p></DataSection>
+  if (section === 'settings') return <ProjectSettingsSection project={project} onSaved={onProjectUpdated} />
   return <DataSection title={title}>{empty('This project section is not available.')}</DataSection>
 }
 
@@ -269,6 +275,43 @@ function RecordRow({ title, details }: { title: string; details: string }) {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <Card><CardContent className="p-4"><p className="text-xs text-slate-500">{label}</p><p className="mt-2 text-xl font-semibold text-slate-900">{value}</p></CardContent></Card>
+}
+
+function ProjectSettingsSection({ project, onSaved }: { project: Project; onSaved: (project: Project) => void }) {
+  const [draft, setDraft] = useState(project)
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  useEffect(() => { setDraft(project) }, [project])
+
+  const save = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setIsSaving(true); setError(''); setMessage('')
+    try {
+      const saved = await updateProject(draft)
+      onSaved(saved)
+      setMessage('Project details saved.')
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save project details.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return <DataSection title={`${project.name} settings`}>
+    {error ? <p role="alert" className="text-sm text-rose-700">{error}</p> : null}
+    {message ? <p role="status" className="text-sm text-emerald-700">{message}</p> : null}
+    <form className="grid gap-4 md:grid-cols-2" onSubmit={save}>
+      <label className="block"><span className="mb-1 block text-sm text-slate-600">Project name</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="w-full rounded-md border border-slate-300 px-3 py-2" required /></label>
+      <label className="block"><span className="mb-1 block text-sm text-slate-600">Environment</span><select value={draft.environment} onChange={(event) => setDraft({ ...draft, environment: event.target.value as Project['environment'] })} className="w-full rounded-md border border-slate-300 px-3 py-2"><option>Development</option><option>Staging</option><option>Production</option></select></label>
+      <label className="block"><span className="mb-1 block text-sm text-slate-600">Website URL</span><input type="url" value={draft.websiteUrl} onChange={(event) => setDraft({ ...draft, websiteUrl: event.target.value })} className="w-full rounded-md border border-slate-300 px-3 py-2" /></label>
+      <label className="block"><span className="mb-1 block text-sm text-slate-600">Repository URL</span><input type="url" value={draft.repositoryUrl} onChange={(event) => setDraft({ ...draft, repositoryUrl: event.target.value })} className="w-full rounded-md border border-slate-300 px-3 py-2" /></label>
+      <label className="block md:col-span-2"><span className="mb-1 block text-sm text-slate-600">Description</span><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className="min-h-24 w-full rounded-md border border-slate-300 px-3 py-2" /></label>
+      <label className="block md:col-span-2"><span className="mb-1 block text-sm text-slate-600">Notes</span><textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} className="min-h-24 w-full rounded-md border border-slate-300 px-3 py-2" /></label>
+      <Button type="submit" disabled={isSaving} className="md:col-span-2">{isSaving ? 'Saving...' : 'Save project details'}</Button>
+    </form>
+  </DataSection>
 }
 
 function ProjectIntegrationsSection({
