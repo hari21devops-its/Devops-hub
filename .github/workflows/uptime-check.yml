@@ -1,0 +1,20 @@
+name: DevOps Hub Uptime Check
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  uptime-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run uptime and domain checks
+        env:
+          UPTIME_CRON_SECRET: ${{ secrets.UPTIME_CRON_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "x-uptime-cron-secret: ${UPTIME_CRON_SECRET}" \
+            "https://ezbcbdkrenbnvhejnhep.supabase.co/functions/v1/scheduled-uptime-check"
