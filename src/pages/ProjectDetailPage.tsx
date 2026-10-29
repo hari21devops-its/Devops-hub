@@ -150,7 +150,7 @@ export function ProjectOverviewPage() {
   const metricValue = (value: number, hasSource: boolean) => hasSource ? String(value) : 'Unavailable'
   const provider = (type: string) => integrations.find((item) => item.resourceType.toLowerCase() === type)?.resourceName ?? 'Not connected'
   const usageMetric = (metric: string) => {
-    const snapshot = usageSnapshots.find((item) => item.metric.toLowerCase() === metric)
+    const snapshot = usageSnapshots.find((item) => item.metric.toLowerCase() === metric || (metric === 'database_usage' && item.metric.toLowerCase() === 'database_storage'))
     return snapshot ? `${snapshot.value.toLocaleString()} ${snapshot.unit}` : 'Unavailable'
   }
 
