@@ -68,6 +68,23 @@ html[data-theme='light'] .bg-sky-600.text-white {
   color: #ffffff;
 }
 
+html:not([data-theme='dark']) .text-white {
+  color: #172033;
+}
+
+html:not([data-theme='dark']) .text-slate-200,
+html:not([data-theme='dark']) .text-slate-300 {
+  color: #334155;
+}
+
+html:not([data-theme='dark']) .text-slate-400 {
+  color: #526176;
+}
+
+html:not([data-theme='dark']) .border-slate-800 {
+  border-color: #cbd5e1;
+}
+
 button,
 input,
 select {
