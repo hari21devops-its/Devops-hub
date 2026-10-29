@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react'
 import { Badge } from '../components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { useAuth } from '../contexts/AuthContext'
-import { getProviderUsageSnapshots, getServices } from '../services/data'
+import { getDomains, getProjects, getProviderUsageSnapshots, getServices } from '../services/data'
 import type { ProviderUsageSnapshot } from '../services/data'
-import type { Service } from '../types'
+import type { Domain, Project, Service } from '../types'
 
 const quotaData = [
   { name: 'Supabase Database', current: 402, limit: 500, unit: 'GB-hours', status: 'Warning' },
@@ -25,6 +25,8 @@ export function UsagePage() {
   const { isDemoMode } = useAuth()
   const [services, setServices] = useState<Service[]>([])
   const [snapshots, setSnapshots] = useState<ProviderUsageSnapshot[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [domains, setDomains] = useState<Domain[]>([])
   const [isLoading, setIsLoading] = useState(!isDemoMode)
   const [error, setError] = useState('')
 
@@ -38,9 +40,9 @@ export function UsagePage() {
 
     let active = true
     setIsLoading(true)
-    void Promise.all([getServices(), getProviderUsageSnapshots()])
-      .then(([items, usageSnapshots]) => {
-        if (active) { setServices(items); setSnapshots(usageSnapshots) }
+    void Promise.all([getServices(), getProviderUsageSnapshots(), getProjects(), getDomains()])
+      .then(([items, usageSnapshots, projectItems, domainItems]) => {
+        if (active) { setServices(items); setSnapshots(usageSnapshots); setProjects(projectItems); setDomains(domainItems) }
       })
       .catch((loadError: unknown) => {
         if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load service usage.')
@@ -84,6 +86,12 @@ export function UsagePage() {
       status: 'Healthy',
     })),
   ]
+  const projectUsage = projects.map((project) => ({
+    project,
+    snapshots: snapshots.filter((snapshot) => snapshot.projectId === project.id),
+    services: services.filter((service) => service.projectId === project.id),
+    domains: domains.filter((domain) => domain.projectId === project.id),
+  }))
 
   return (
     <div className="space-y-6">
@@ -162,6 +170,17 @@ export function UsagePage() {
           </CardContent>
         </Card>
       </div>
+
+      {!isDemoMode ? <div className="space-y-5">
+        <h3 className="text-xl font-semibold text-white">Usage by project</h3>
+        {projectUsage.length === 0 ? <Card><CardContent className="p-5 text-sm text-slate-400">No projects with live usage data yet.</CardContent></Card> : projectUsage.map(({ project, snapshots: projectSnapshots, services: projectServices, domains: projectDomains }) => {
+          const providers = [...new Set([...projectSnapshots.map((item) => item.provider), ...projectServices.map((item) => item.provider)])]
+          return <Card key={project.id}><CardHeader><CardTitle>{project.name}</CardTitle></CardHeader><CardContent className="space-y-4">
+            {providers.length ? providers.map((provider) => <div key={provider} className="rounded-lg border border-slate-200 p-4"><h4 className="font-medium text-slate-900">{provider}</h4><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{projectSnapshots.filter((item) => item.provider === provider).map((item) => <div key={`${item.provider}-${item.metric}`} className="rounded-md bg-slate-50 p-3"><p className="text-xs capitalize text-slate-500">{item.metric.replaceAll('_', ' ')}</p><p className="mt-1 font-semibold text-slate-900">{item.value.toLocaleString()} {item.unit}</p></div>)}{projectServices.filter((item) => item.provider === provider).map((item) => <div key={item.id} className="rounded-md bg-slate-50 p-3"><p className="text-xs text-slate-500">{item.name}</p><p className="mt-1 font-semibold text-slate-900">{item.currentUsage.toLocaleString()} {item.usageUnit}{item.usageLimit ? ` / ${item.usageLimit.toLocaleString()}` : ''}</p></div>)}</div></div>) : <p className="text-sm text-slate-500">No provider usage synchronized for this project.</p>}
+            <div className="rounded-lg border border-slate-200 p-4"><h4 className="font-medium text-slate-900">Domains</h4>{projectDomains.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{projectDomains.map((domain) => <div key={domain.id} className="rounded-md bg-slate-50 p-3"><p className="font-medium text-slate-900">{domain.name}</p><p className="mt-1 text-sm text-slate-500">DNS: {domain.dnsProvider || 'Unavailable'} · SSL: {domain.sslStatus}</p></div>)}</div> : <p className="mt-2 text-sm text-slate-500">No domains associated with this project.</p>}</div>
+          </CardContent></Card>
+        })}
+      </div> : null}
     </div>
   )
 }
