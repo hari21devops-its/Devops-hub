@@ -23,3 +23,17 @@ jobs:
           if [ "$status" -ge 400 ]; then
             exit 1
           fi
+
+      - name: Send pending Telegram notifications
+        env:
+          UPTIME_CRON_SECRET: ${{ secrets.UPTIME_CRON_SECRET }}
+        run: |
+          response=$(curl --silent --show-error --write-out "\nHTTP_STATUS:%{http_code}" \
+            --request POST \
+            --header "x-uptime-cron-secret: ${UPTIME_CRON_SECRET}" \
+            "https://ezbcbdkrenbnvhejnhep.supabase.co/functions/v1/scheduled-telegram-notify")
+          echo "$response"
+          status=$(echo "$response" | sed -n 's/^HTTP_STATUS://p')
+          if [ "$status" -ge 400 ]; then
+            exit 1
+          fi
