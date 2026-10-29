@@ -102,6 +102,13 @@ Deno.serve(async (request) => {
       return jsonResponse({ connected: true, accountId: String(profile.login ?? profile.id) })
     }
 
+    if (action === 'repositories') {
+      if (!connection) return jsonResponse({ error: 'Connect GitHub before discovering repositories.' }, 404)
+      const token = await decryptToken(connection.encrypted_token, connection.token_iv)
+      const repositories = await githubRequest('/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member', token)
+      return jsonResponse({ repositories: (Array.isArray(repositories) ? repositories : []).map((repository) => ({ id: String(repository.id), name: String(repository.name), fullName: String(repository.full_name), private: Boolean(repository.private) })) })
+    }
+
     if (action === 'sync') {
       const projectId = String(body.projectId ?? '').trim()
       if (!projectId) return jsonResponse({ error: 'Choose a project to sync.' }, 400)

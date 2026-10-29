@@ -4,7 +4,7 @@ import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { useAuth } from '../contexts/AuthContext'
-import { getProjects } from '../services/data'
+import { createProjectIntegration, getProjects } from '../services/data'
 import { supabase } from '../services/supabase'
 import type { Project } from '../types'
 
@@ -16,6 +16,8 @@ export function IntegrationsPage() {
   const [apiToken, setApiToken] = useState('')
   const [githubToken, setGithubToken] = useState('')
   const [githubConnection, setGithubConnection] = useState<{ connected: boolean; accountId: string | null; lastSyncedAt: string | null }>({ connected: false, accountId: null, lastSyncedAt: null })
+  const [githubRepositories, setGithubRepositories] = useState<Array<{ id: string; name: string; fullName: string; private: boolean }>>([])
+  const [githubRepository, setGithubRepository] = useState('')
   const [telegramToken, setTelegramToken] = useState('')
   const [telegramChatId, setTelegramChatId] = useState('')
   const [telegramConnection, setTelegramConnection] = useState<{ connected: boolean; chatId: string | null; lastSyncedAt: string | null }>({ connected: false, chatId: null, lastSyncedAt: null })
@@ -29,6 +31,7 @@ export function IntegrationsPage() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [isGithubConnecting, setIsGithubConnecting] = useState(false)
   const [isGithubSyncing, setIsGithubSyncing] = useState(false)
+  const [isGithubDiscovering, setIsGithubDiscovering] = useState(false)
   const [isTelegramConnecting, setIsTelegramConnecting] = useState(false)
   const [isTelegramSending, setIsTelegramSending] = useState(false)
   const [isCloudinaryConnecting, setIsCloudinaryConnecting] = useState(false)
@@ -163,6 +166,36 @@ export function IntegrationsPage() {
       setError(syncError instanceof Error ? syncError.message : 'Unable to sync GitHub deployments.')
     } finally {
       setIsGithubSyncing(false)
+    }
+  }
+
+  const handleGithubDiscover = async () => {
+    if (!supabase) return
+    setIsGithubDiscovering(true)
+    setError('')
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('github-sync', { body: { action: 'repositories' } })
+      if (invokeError) throw new Error(invokeError.message)
+      if (data?.error) throw new Error(String(data.error))
+      const repositories = Array.isArray(data?.repositories) ? data.repositories as typeof githubRepositories : []
+      setGithubRepositories(repositories)
+      setGithubRepository((current) => current || repositories[0]?.fullName || '')
+      setMessage(`Discovered ${repositories.length} GitHub repositories.`)
+    } catch (discoverError) {
+      setError(discoverError instanceof Error ? discoverError.message : 'Unable to discover GitHub repositories.')
+    } finally {
+      setIsGithubDiscovering(false)
+    }
+  }
+
+  const handleGithubAssociate = async () => {
+    if (!githubRepository || !projectId) return
+    setError('')
+    try {
+      await createProjectIntegration({ projectId, provider: 'GitHub', resourceType: 'repository', resourceId: githubRepository, resourceName: githubRepository, connectionStatus: 'Connected' })
+      setMessage(`Associated ${githubRepository} with the selected project.`)
+    } catch (associateError) {
+      setError(associateError instanceof Error ? associateError.message : 'Unable to associate the GitHub repository.')
     }
   }
 
@@ -342,7 +375,7 @@ export function IntegrationsPage() {
               <input type="password" autoComplete="new-password" value={githubToken} onChange={(event) => setGithubToken(event.target.value)} placeholder="GitHub token" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required />
               <Button type="submit" disabled={isGithubConnecting || isLoading}>{isGithubConnecting ? 'Connecting...' : githubConnection.connected ? 'Replace GitHub connection' : 'Connect GitHub'}</Button>
             </form>
-            {githubConnection.connected ? <div className="grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-[1fr_auto] md:items-end"><label className="block"><span className="mb-1 block text-sm text-slate-300">Sync repository for project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><Button type="button" onClick={() => void handleGithubSync()} disabled={isGithubSyncing || !projectId}>{isGithubSyncing ? 'Syncing...' : 'Sync GitHub deployments'}</Button></div> : null}
+            {githubConnection.connected ? <div className="space-y-4 border-t border-slate-200 pt-4"><div className="grid gap-4 md:grid-cols-2"><label className="block"><span className="mb-1 block text-sm text-slate-300">Project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" required>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><div className="flex items-end"><Button type="button" onClick={() => void handleGithubDiscover()} disabled={isGithubDiscovering}>{isGithubDiscovering ? 'Discovering...' : 'Discover repositories'}</Button></div></div>{githubRepositories.length ? <div className="grid gap-4 md:grid-cols-[1fr_auto_auto]"><select value={githubRepository} onChange={(event) => setGithubRepository(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">{githubRepositories.map((repository) => <option key={repository.id} value={repository.fullName}>{repository.fullName}{repository.private ? ' (private)' : ''}</option>)}</select><Button type="button" variant="outline" onClick={() => void handleGithubAssociate()} disabled={!projectId || !githubRepository}>Associate repository</Button><Button type="button" onClick={() => void handleGithubSync()} disabled={isGithubSyncing || !projectId}>{isGithubSyncing ? 'Syncing...' : 'Sync deployments'}</Button></div> : null}</div> : null}
           </CardContent>
         </Card>
       ) : null}
