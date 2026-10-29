@@ -16,6 +16,7 @@ import {
   getIncidents,
   getMonitors,
   getProjectIntegrations,
+  getProviderUsageSnapshots,
   getProjects,
   getSyncRuns,
   getServices,
@@ -27,6 +28,7 @@ import {
   type IncidentRecord,
   type MonitorRecord,
   type ProjectIntegrationRecord,
+  type ProviderUsageSnapshot,
   type SyncRunRecord,
 } from '../services/data'
 import type { Domain, Project, Service } from '../types'
@@ -109,6 +111,7 @@ export function ProjectOverviewPage() {
   const [analytics, setAnalytics] = useState<AnalyticsDailyRecord[]>([])
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([])
   const [integrations, setIntegrations] = useState<ProjectIntegrationRecord[]>([])
+  const [usageSnapshots, setUsageSnapshots] = useState<ProviderUsageSnapshot[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -118,10 +121,10 @@ export function ProjectOverviewPage() {
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
     void Promise.all([
       getDomains(project.id), getServices(project.id), getMonitors(project.id), getIncidents(project.id),
-      getAnalyticsDaily(project.id, monthStart), getExpenses(project.id), getProjectIntegrations(project.id),
-    ]).then(([d, s, m, i, a, e, resources]) => {
+      getAnalyticsDaily(project.id, monthStart), getExpenses(project.id), getProjectIntegrations(project.id), getProviderUsageSnapshots(project.id),
+    ]).then(([d, s, m, i, a, e, resources, snapshots]) => {
       if (!active) return
-      setDomains(d); setServices(s); setMonitors(m); setIncidents(i); setAnalytics(a); setExpenses(e); setIntegrations(resources)
+      setDomains(d); setServices(s); setMonitors(m); setIncidents(i); setAnalytics(a); setExpenses(e); setIntegrations(resources); setUsageSnapshots(snapshots)
     }).catch((loadError: unknown) => {
       if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load project data.')
     }).finally(() => {
@@ -141,6 +144,10 @@ export function ProjectOverviewPage() {
   const status = monitors.length === 0 ? 'Not configured' : offlineCount ? 'Offline' : onlineCount ? 'Online' : 'Awaiting first check'
   const metricValue = (value: number, hasSource: boolean) => hasSource ? String(value) : 'Unavailable'
   const provider = (type: string) => integrations.find((item) => item.resourceType.toLowerCase() === type)?.resourceName ?? 'Not connected'
+  const usageMetric = (metric: string) => {
+    const snapshot = usageSnapshots.find((item) => item.metric.toLowerCase() === metric)
+    return snapshot ? `${snapshot.value.toLocaleString()} ${snapshot.unit}` : 'Unavailable'
+  }
 
   return (
     <div className="space-y-6">
@@ -171,9 +178,9 @@ export function ProjectOverviewPage() {
               ['Services', String(services.length)],
               ['Expenses this month', currentExpenses.length ? currentExpenses.map((expense) => `${expense.currency} ${expense.amount.toLocaleString()}`).join(' + ') : 'No records'],
               ['Active incidents', String(activeIncidents)],
-              ['Bandwidth', 'Unavailable'],
-              ['Database usage', 'Unavailable'],
-              ['Storage', 'Unavailable'],
+              ['Bandwidth', usageMetric('bandwidth')],
+              ['Database usage', usageMetric('database_usage')],
+              ['Storage', usageMetric('storage')],
               ['Recent errors', integrations.some((item) => item.resourceType.toLowerCase() === 'errors') ? 'Open Errors tab' : 'Unavailable'],
             ].map(([label, value]) => <Card key={label}><CardContent className="p-4"><p className="text-xs text-slate-500">{label}</p><p className="mt-2 text-lg font-semibold text-slate-900">{value}</p></CardContent></Card>)}
           </div>

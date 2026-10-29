@@ -69,6 +69,18 @@ export type SyncRunRecord = {
   errorMessage: string | null
 }
 
+export type ProviderUsageSnapshot = {
+  id: string
+  projectId: string
+  provider: string
+  metric: string
+  value: number
+  unit: string
+  periodStart: string | null
+  periodEnd: string | null
+  syncedAt: string
+}
+
 export type ExpenseRecord = {
   id: string
   projectId: string
@@ -604,6 +616,29 @@ export async function getSyncRuns(projectId: string, limit = 20): Promise<SyncRu
     completedAt: record.completed_at ? String(record.completed_at) : null,
     recordsImported: Number(record.records_imported ?? 0),
     errorMessage: record.error_message ? String(record.error_message) : null,
+  }))
+}
+
+export async function getProviderUsageSnapshots(projectId: string): Promise<ProviderUsageSnapshot[]> {
+  if (!supabase) return []
+
+  const { data, error } = await supabase
+    .from('provider_usage_snapshots')
+    .select('id, project_id, provider, metric, value, unit, period_start, period_end, synced_at')
+    .eq('project_id', projectId)
+    .order('synced_at', { ascending: false })
+  if (error) throw new Error(error.message)
+
+  return (data ?? []).map((record) => ({
+    id: String(record.id),
+    projectId: String(record.project_id),
+    provider: String(record.provider),
+    metric: String(record.metric),
+    value: Number(record.value ?? 0),
+    unit: String(record.unit),
+    periodStart: record.period_start ? String(record.period_start) : null,
+    periodEnd: record.period_end ? String(record.period_end) : null,
+    syncedAt: String(record.synced_at),
   }))
 }
 
