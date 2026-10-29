@@ -37,6 +37,8 @@ function numeric(payload: Record<string, unknown>, keyName: string) {
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return response({ error: 'Method not allowed.' }, 405)
+  let syncRunId: string | null = null
+  let adminClient: ReturnType<typeof createClient> | null = null
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
@@ -47,7 +49,7 @@ Deno.serve(async (request) => {
     const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authorization } } })
     const { data: { user }, error: authError } = await userClient.auth.getUser()
     if (authError || !user) return response({ error: 'The current session is invalid.' }, 401)
-    const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
+    const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } }); adminClient = admin
     const body = await request.json()
     const action = String(body.action ?? '')
     const { data: connection } = await admin.from('provider_connections').select('account_id, encrypted_token, token_iv, last_synced_at').eq('owner_id', user.id).eq('provider', 'cloudinary').maybeSingle()
@@ -69,6 +71,9 @@ Deno.serve(async (request) => {
       if (!projectId || !connection) return response({ error: 'Choose a project and connect Cloudinary before syncing.' }, 400)
       const { data: project } = await admin.from('projects').select('id').eq('id', projectId).eq('owner_id', user.id).maybeSingle()
       if (!project) return response({ error: 'Project not found for this account.' }, 404)
+      const { data: syncRun, error: syncRunError } = await admin.from('sync_runs').insert({ project_id: projectId, provider: 'cloudinary', status: 'running' }).select('id').single()
+      if (syncRunError || !syncRun) throw new Error('Unable to start the Cloudinary synchronization record.')
+      syncRunId = String(syncRun.id)
       const credentials = await decrypt(String(connection.encrypted_token), String(connection.token_iv))
       const separator = credentials.indexOf(':')
       const payload = await usage(String(connection.account_id), credentials.slice(0, separator), credentials.slice(separator + 1))
@@ -82,10 +87,12 @@ Deno.serve(async (request) => {
       const { error } = await admin.from('provider_usage_snapshots').insert(metrics.map((item) => ({ project_id: projectId, provider: 'Cloudinary', metric: item.metric, value: item.value, unit: item.unit, synced_at: syncedAt })))
       if (error) throw new Error('Cloudinary usage was fetched, but snapshots could not be saved.')
       await admin.from('provider_connections').update({ last_synced_at: syncedAt }).eq('owner_id', user.id).eq('provider', 'cloudinary')
+      await admin.from('sync_runs').update({ status: 'succeeded', completed_at: syncedAt, records_imported: metrics.length }).eq('id', syncRunId)
       return response({ imported: metrics.length, cloudName: connection.account_id })
     }
     return response({ error: 'Unsupported action.' }, 400)
   } catch (error) {
+    if (syncRunId && adminClient) await adminClient.from('sync_runs').update({ status: 'failed', completed_at: new Date().toISOString(), error_message: error instanceof Error ? error.message : 'Cloudinary operation failed.' }).eq('id', syncRunId)
     return response({ error: error instanceof Error ? error.message : 'Cloudinary operation failed.' }, 500)
   }
 })
