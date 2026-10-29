@@ -14,7 +14,12 @@ jobs:
         env:
           UPTIME_CRON_SECRET: ${{ secrets.UPTIME_CRON_SECRET }}
         run: |
-          curl --fail-with-body --silent --show-error \
+          response=$(curl --silent --show-error --write-out "\nHTTP_STATUS:%{http_code}" \
             --request POST \
             --header "x-uptime-cron-secret: ${UPTIME_CRON_SECRET}" \
-            "https://ezbcbdkrenbnvhejnhep.supabase.co/functions/v1/scheduled-uptime-check"
+            "https://ezbcbdkrenbnvhejnhep.supabase.co/functions/v1/scheduled-uptime-check")
+          echo "$response"
+          status=$(echo "$response" | sed -n 's/^HTTP_STATUS://p')
+          if [ "$status" -ge 400 ]; then
+            exit 1
+          fi
