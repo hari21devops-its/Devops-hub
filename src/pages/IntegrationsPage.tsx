@@ -37,21 +37,29 @@ export function IntegrationsPage() {
     }
 
     let active = true
+    const client = supabase
+    const readStatus = async (functionName: string) => {
+      const result = await client.functions.invoke(functionName, { body: { action: 'status' } })
+      return { data: result.data, error: result.error?.message ?? null }
+    }
     void Promise.all([
-      supabase.functions.invoke('cloudflare-billing', { body: { action: 'status' } }),
-      supabase.functions.invoke('github-sync', { body: { action: 'status' } }),
-      supabase.functions.invoke('telegram-notify', { body: { action: 'status' } }),
+      readStatus('cloudflare-billing'),
+      readStatus('github-sync'),
+      readStatus('telegram-notify'),
       getProjects(),
     ]).then(([statusResult, githubStatusResult, telegramStatusResult, loadedProjects]) => {
-      if (statusResult.error) throw new Error(statusResult.error.message)
-      if (githubStatusResult.error) throw new Error(githubStatusResult.error.message)
-      if (telegramStatusResult.error) throw new Error(telegramStatusResult.error.message)
       if (!active) return
-      setConnection(statusResult.data as typeof connection)
-      setGithubConnection(githubStatusResult.data as typeof githubConnection)
-      setTelegramConnection(telegramStatusResult.data as typeof telegramConnection)
+      if (statusResult.data) setConnection(statusResult.data as typeof connection)
+      if (githubStatusResult.data) setGithubConnection(githubStatusResult.data as typeof githubConnection)
+      if (telegramStatusResult.data) setTelegramConnection(telegramStatusResult.data as typeof telegramConnection)
       setProjects(loadedProjects)
       setProjectId((current) => current || loadedProjects[0]?.id || '')
+      const failures = [
+        statusResult.error ? `Cloudflare: ${statusResult.error}` : '',
+        githubStatusResult.error ? `GitHub: ${githubStatusResult.error}` : '',
+        telegramStatusResult.error ? `Telegram: ${telegramStatusResult.error}` : '',
+      ].filter(Boolean)
+      if (failures.length) setError(`Integration status unavailable. ${failures.join(' | ')}`)
     }).catch((loadError: unknown) => {
       if (active) setError(loadError instanceof Error ? loadError.message : 'Unable to load integration status.')
     }).finally(() => {
